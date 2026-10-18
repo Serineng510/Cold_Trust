@@ -1,0 +1,187 @@
+{
+ "_source": "Expected IDs produced by https://epcis-sandbox.gs1.org/event-hash-generator (SHA-256, CBV 2.0.0) on 2026-10-05",
+ "vectors": [
+  {
+   "name": "GS1 sandbox sample (ObjectEvent + sensorElementList)",
+   "expected": "ni:///sha-256;2af03ea4665a3812499739f707bc50e2f54be7d5065b1d6bd54faf164a22839c?ver=CBV2.0",
+   "document": {
+    "@context": [
+     "https://ref.gs1.org/standards/epcis/2.0.0/epcis-context.jsonld"
+    ],
+    "type": "EPCISDocument",
+    "schemaVersion": "2.0",
+    "creationDate": "2023-09-14T11:30:47.022Z",
+    "epcisBody": {
+     "eventList": [
+      {
+       "eventID": "ni:///sha-256;2af03ea4665a3812499739f707bc50e2f54be7d5065b1d6bd54faf164a22839c?ver=CBV2.0",
+       "type": "ObjectEvent",
+       "eventTime": "2023-09-12T15:00:03.321Z",
+       "eventTimeZoneOffset": "+02:00",
+       "epcList": [
+        "https://id.gs1.org/01/09521987654327/21/202301"
+       ],
+       "action": "OBSERVE",
+       "bizStep": "inspecting",
+       "readPoint": {
+        "id": "https://id.gs1.org/414/9521999100003"
+       },
+       "sensorElementList": [
+        {
+         "sensorMetadata": {
+          "time": "2023-09-12T14:05:12.322Z",
+          "deviceID": "https://id.gs1.org/8004/9521999111",
+          "deviceMetadata": "https://id.gs1.org/8004/95219990001",
+          "rawData": "https://id.gs1.org/8004/95219990001"
+         },
+         "sensorReport": [
+          {
+           "type": "Temperature",
+           "value": 26,
+           "uom": "CEL"
+          },
+          {
+           "type": "AbsoluteHumidity",
+           "value": 12.1,
+           "uom": "A93"
+          },
+          {
+           "type": "Speed",
+           "value": 160,
+           "uom": "KMH"
+          },
+          {
+           "type": "Illuminance",
+           "value": 800,
+           "uom": "LUX"
+          }
+         ]
+        },
+        {
+         "sensorMetadata": {
+          "time": "2023-09-12T14:35:00.012Z",
+          "deviceID": "https://id.gs1.org/8004/9521999111",
+          "deviceMetadata": "https://id.gs1.org/8004/95219990001",
+          "rawData": "https://id.gs1.org/8004/95219990001"
+         },
+         "sensorReport": [
+          {
+           "type": "Temperature",
+           "value": 26.1,
+           "uom": "CEL"
+          },
+          {
+           "type": "AbsoluteHumidity",
+           "value": 12.2,
+           "uom": "A93"
+          },
+          {
+           "type": "Speed",
+           "value": 161,
+           "uom": "KMH"
+          },
+          {
+           "type": "Illuminance",
+           "value": 801,
+           "uom": "LUX"
+          }
+         ]
+        },
+        {
+         "sensorMetadata": {
+          "time": "2023-09-12T14:55:00.321Z",
+          "deviceID": "https://id.gs1.org/8004/9521999111",
+          "deviceMetadata": "https://id.gs1.org/8004/95219990001",
+          "rawData": "https://id.gs1.org/8004/95219990001"
+         },
+         "sensorReport": [
+          {
+           "type": "Temperature",
+           "value": 26.2,
+           "uom": "CEL"
+          },
+          {
+           "type": "AbsoluteHumidity",
+           "value": 12.2,
+           "uom": "A93"
+          },
+          {
+           "type": "Speed",
+           "value": 162,
+           "uom": "KMH"
+          },
+          {
+           "type": "Illuminance",
+           "value": 802,
+           "uom": "LUX"
+          }
+         ]
+        }
+       ]
+      }
+     ]
+    }
+   }
+  },
+  {
+   "name": "Secure Handoff POD event (disposition, geo readPoint, bizLocation, bizTransaction, source/destination, sh: extensions)",
+   "expected": "ni:///sha-256;4f9f4a350878e0396890f6a630aaf90a4aaf43e5ae67e790bda0431f37a54baa?ver=CBV2.0",
+   "document": {
+    "@context": [
+     "https://ref.gs1.org/standards/epcis/2.0.0/epcis-context.jsonld",
+     {
+      "sh": "https://securehandoff.example/epcis/"
+     }
+    ],
+    "type": "EPCISDocument",
+    "schemaVersion": "2.0",
+    "creationDate": "2026-10-05T05:14:48.775Z",
+    "epcisBody": {
+     "eventList": [
+      {
+       "eventID": "ni:///sha-256;4f9f4a350878e0396890f6a630aaf90a4aaf43e5ae67e790bda0431f37a54baa?ver=CBV2.0",
+       "type": "ObjectEvent",
+       "eventTime": "2026-10-05T04:54:25.937Z",
+       "eventTimeZoneOffset": "+08:00",
+       "epcList": [
+        "https://id.gs1.org/00/095212340000482130",
+        "https://id.gs1.org/00/095212340000000112"
+       ],
+       "action": "OBSERVE",
+       "bizStep": "accepting",
+       "disposition": "in_progress",
+       "readPoint": {
+        "id": "geo:3.153069,101.703800"
+       },
+       "bizLocation": {
+        "id": "https://id.gs1.org/414/9521234000013"
+       },
+       "bizTransactionList": [
+        {
+         "type": "po",
+         "bizTransaction": "urn:epcglobal:cbv:bt:9521234000006:ORD1"
+        }
+       ],
+       "sourceList": [
+        {
+         "type": "possessing_party",
+         "source": "https://id.gs1.org/417/9521234009009"
+        }
+       ],
+       "destinationList": [
+        {
+         "type": "location",
+         "destination": "https://id.gs1.org/414/9521234000013"
+        }
+       ],
+       "sh:driverWorkId": "WID-1001",
+       "sh:podPhotoSha256": "abc123",
+       "sh:geofenceDistanceM": 29.9
+      }
+     ]
+    }
+   }
+  }
+ ],
+ "_note": "The GS1 sample originally embedded eventID ni:///sha-256;f1264047...; the sandbox generator itself now yields the value below, so eventIDs here are set to what the sandbox computes."
+}

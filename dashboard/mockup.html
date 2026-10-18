@@ -1,0 +1,716 @@
+<meta charset="utf-8">
+<title>ColdTrust Dashboard Mockup</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Instrument+Sans:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+/* Layout: icon rail + sticky top bar + alert ticker, then one of five views.
+   Dark-first (the brief asks for dark mode); graphite neutrals leaning cool, one pale-butter accent for primary
+   actions and selection. Status colours (ok / warn / crit / info) are semantic and kept separate from the accent. */
+:root{
+  --bg:#0d0f12; --panel:#14171b; --panel2:#191d22; --line:#262b32; --line2:#323841;
+  --fg:#e9ecf0; --mut:#98a1ad; --dim:#69727e;
+  --accent:#ecf0a6; --on-accent:#16180a;
+  --ok:#3fcf8e; --warn:#f2b441; --crit:#ff6b5e; --info:#6aa8ff;
+  --map:#101317; --road:#232830; --road2:#2d343d;
+  --shadow:0 10px 30px rgba(0,0,0,.45);
+  --ui:"Instrument Sans",system-ui,-apple-system,"Segoe UI",sans-serif;
+  --mono:"JetBrains Mono",ui-monospace,"SFMono-Regular",Consolas,monospace;
+  color-scheme:dark;
+}
+@media (prefers-color-scheme:light){:root:not([data-theme="dark"]){
+  --bg:#eef0f3; --panel:#ffffff; --panel2:#f5f6f8; --line:#dde1e6; --line2:#c9cfd6;
+  --fg:#15181d; --mut:#556070; --dim:#7b8593;
+  --accent:#3b4210; --on-accent:#f4f7c4;
+  --ok:#17935e; --warn:#a96d00; --crit:#d23a2d; --info:#2d6ad6;
+  --map:#e6e9ee; --road:#d3d8df; --road2:#c3cad3; --shadow:0 10px 30px rgba(20,30,50,.14); color-scheme:light}}
+:root[data-theme="light"]{
+  --bg:#eef0f3; --panel:#ffffff; --panel2:#f5f6f8; --line:#dde1e6; --line2:#c9cfd6;
+  --fg:#15181d; --mut:#556070; --dim:#7b8593;
+  --accent:#3b4210; --on-accent:#f4f7c4;
+  --ok:#17935e; --warn:#a96d00; --crit:#d23a2d; --info:#2d6ad6;
+  --map:#e6e9ee; --road:#d3d8df; --road2:#c3cad3; --shadow:0 10px 30px rgba(20,30,50,.14); color-scheme:light}
+
+*{box-sizing:border-box}
+[hidden]{display:none!important}
+body{margin:0;background:var(--bg);color:var(--fg);font:14px/1.45 var(--ui);-webkit-font-smoothing:antialiased}
+button,input,select{font:inherit;color:inherit}
+button{cursor:pointer;background:none;border:0;padding:0}
+:focus-visible{outline:2px solid var(--info);outline-offset:2px;border-radius:6px}
+.mono{font-family:var(--mono);font-variant-numeric:tabular-nums}
+.tn{font-variant-numeric:tabular-nums}
+.mut{color:var(--mut)} .dim{color:var(--dim)}
+
+.app{display:grid;grid-template-columns:60px minmax(0,1fr);min-height:100%}
+.rail{position:sticky;top:0;height:100vh;border-right:1px solid var(--line);background:var(--panel);display:flex;flex-direction:column;align-items:center;gap:6px;padding:14px 0}
+.rail .mark{width:34px;height:34px;border-radius:10px;background:var(--accent);color:var(--on-accent);display:grid;place-items:center;margin-bottom:10px}
+.rail button{width:40px;height:40px;border-radius:12px;display:grid;place-items:center;color:var(--mut)}
+.rail button:hover{background:var(--panel2);color:var(--fg)}
+.rail button.on{background:var(--panel2);color:var(--fg);box-shadow:inset 0 0 0 1px var(--line2)}
+.rail .sp{flex:1}
+.wrap{padding:0 20px 90px;min-width:0}
+
+/* top bar */
+.top{position:sticky;top:0;z-index:20;background:color-mix(in srgb,var(--bg) 88%,transparent);backdrop-filter:blur(10px);display:flex;align-items:center;gap:12px;padding:12px 0;flex-wrap:wrap}
+.brand{display:flex;align-items:center;gap:9px;font-weight:700;letter-spacing:.2px;font-size:16px}
+.seg{display:inline-flex;background:var(--panel);border:1px solid var(--line);border-radius:999px;padding:3px;gap:2px}
+.seg button{padding:5px 13px;border-radius:999px;color:var(--mut);font-weight:500}
+.seg button.on{background:var(--panel2);color:var(--fg);box-shadow:inset 0 0 0 1px var(--line2)}
+.search{position:relative;flex:1;min-width:180px;max-width:420px}
+.search input{width:100%;background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:8px 52px 8px 34px;color:var(--fg)}
+.search svg{position:absolute;left:11px;top:50%;transform:translateY(-50%);color:var(--dim)}
+.search kbd{position:absolute;right:9px;top:50%;transform:translateY(-50%);font:11px var(--mono);color:var(--dim);border:1px solid var(--line);border-radius:6px;padding:1px 6px}
+.pop{position:absolute;z-index:30;top:calc(100% + 8px);background:var(--panel);border:1px solid var(--line2);border-radius:14px;box-shadow:var(--shadow);padding:6px;min-width:260px}
+.pop[hidden]{display:none}
+.pop .it{display:flex;gap:10px;align-items:center;justify-content:space-between;width:100%;text-align:left;padding:8px 10px;border-radius:9px}
+.pop .it:hover{background:var(--panel2)}
+.chips{display:flex;gap:6px;flex-wrap:wrap}
+.chip{display:inline-flex;align-items:center;gap:6px;background:var(--panel);border:1px solid var(--line);border-radius:999px;padding:4px 10px;font-size:12px;color:var(--mut);white-space:nowrap}
+.chip b{color:var(--fg);font-weight:600}
+.grow{flex:1}
+.ico-btn{position:relative;width:38px;height:38px;border-radius:12px;background:var(--panel);border:1px solid var(--line);display:grid;place-items:center;color:var(--mut)}
+.ico-btn .n{position:absolute;top:-5px;right:-5px;background:var(--crit);color:#fff;border-radius:999px;font-size:10px;font-weight:700;min-width:17px;height:17px;display:grid;place-items:center;padding:0 4px}
+.me{display:flex;align-items:center;gap:9px;background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:4px 10px 4px 5px}
+.av{width:28px;height:28px;border-radius:50%;background:var(--panel2);display:grid;place-items:center;font-size:11px;font-weight:700;border:1px solid var(--line2)}
+.relw{position:relative}
+
+/* ticker */
+.ticker{display:flex;align-items:center;gap:12px;background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:0 12px;height:38px;overflow:hidden}
+.ticker .lbl{font:600 11px var(--mono);letter-spacing:.8px;color:var(--mut);white-space:nowrap}
+.ticker .track{overflow:hidden;flex:1;mask-image:linear-gradient(90deg,transparent,#000 24px,#000 calc(100% - 24px),transparent)}
+.ticker .run{display:inline-flex;gap:38px;white-space:nowrap;animation:tick 34s linear infinite;padding-left:100%}
+@keyframes tick{to{transform:translateX(-100%)}}
+.ticker .a{display:inline-flex;gap:8px;align-items:center}
+@media (prefers-reduced-motion:reduce){.ticker .run{animation:none;padding-left:0}}
+
+/* header + tabs */
+.crumb{font-size:12px;color:var(--dim);margin:18px 0 6px}
+.vhead{display:flex;align-items:flex-end;gap:14px;flex-wrap:wrap;margin-bottom:12px}
+.vhead h1{margin:0;font-size:30px;line-height:1.1;font-weight:600;letter-spacing:-.4px}
+.btn{display:inline-flex;align-items:center;gap:7px;border:1px solid var(--line2);background:var(--panel);border-radius:999px;padding:7px 14px;font-weight:500;color:var(--fg)}
+.btn:hover{background:var(--panel2)}
+.btn.pri{background:var(--accent);color:var(--on-accent);border-color:transparent;font-weight:600}
+.btn.sm{padding:5px 11px;font-size:12.5px}
+.btn:disabled{opacity:.45;cursor:not-allowed}
+.tabs{display:flex;gap:4px;border-bottom:1px solid var(--line);margin:6px 0 16px;overflow-x:auto}
+.tabs button{padding:9px 14px;color:var(--mut);font-weight:500;border-bottom:2px solid transparent;white-space:nowrap}
+.tabs button.on{color:var(--fg);border-color:var(--accent)}
+.tabs .c{font-size:11px;background:var(--panel2);border-radius:999px;padding:1px 7px;margin-left:5px;color:var(--mut)}
+
+/* panels */
+.card{background:var(--panel);border:1px solid var(--line);border-radius:18px;min-width:0}
+.card>.h{display:flex;align-items:center;gap:10px;padding:14px 16px 0;flex-wrap:wrap}
+.card>.h h3{margin:0;font-size:15px;font-weight:600}
+.card>.b{padding:14px 16px 16px}
+.g{display:grid;gap:14px;min-width:0}
+.g2{grid-template-columns:minmax(0,1.9fr) minmax(0,1fr)}
+.g3{grid-template-columns:repeat(3,minmax(0,1fr))}
+.g4{grid-template-columns:repeat(4,minmax(0,1fr))}
+.gcargo{grid-template-columns:minmax(0,1.25fr) minmax(0,1fr)}
+@media (max-width:1100px){.g2,.gcargo{grid-template-columns:minmax(0,1fr)}.g4{grid-template-columns:repeat(2,minmax(0,1fr))}.g3{grid-template-columns:minmax(0,1fr)}}
+@media (max-width:760px){.app{grid-template-columns:minmax(0,1fr)}.rail{display:none}.wrap{padding:0 16px 120px}.vhead h1{font-size:24px}.g4{grid-template-columns:minmax(0,1fr)}}
+
+.pill{display:inline-flex;align-items:center;gap:6px;border-radius:999px;padding:2px 9px;font-size:11.5px;font-weight:600;white-space:nowrap}
+.pill i{width:6px;height:6px;border-radius:50%;background:currentColor}
+.t-ok{color:var(--ok);background:color-mix(in srgb,var(--ok) 15%,transparent)}
+.t-warn{color:var(--warn);background:color-mix(in srgb,var(--warn) 15%,transparent)}
+.t-crit{color:var(--crit);background:color-mix(in srgb,var(--crit) 16%,transparent)}
+.t-info{color:var(--info);background:color-mix(in srgb,var(--info) 15%,transparent)}
+.t-mut{color:var(--mut);background:var(--panel2)}
+.tag{font-size:11px;color:var(--mut);background:var(--panel2);border:1px solid var(--line);border-radius:7px;padding:1px 7px;white-space:nowrap}
+.bar{height:7px;background:var(--panel2);border-radius:99px;overflow:hidden}
+.bar>i{display:block;height:100%;border-radius:99px;background:var(--info)}
+
+/* map */
+.map{position:relative;background:var(--map);border-radius:14px;overflow:hidden;border:1px solid var(--line)}
+.map svg{display:block;width:100%;height:auto}
+.mapov{position:absolute;left:12px;top:12px;width:min(300px,calc(100% - 24px));background:color-mix(in srgb,var(--panel) 92%,transparent);backdrop-filter:blur(8px);border:1px solid var(--line2);border-radius:14px;padding:12px;box-shadow:var(--shadow)}
+.mapov h4{margin:0;font-size:16px}
+.gauges{display:grid;grid-template-columns:1fr 1fr;gap:6px;margin-top:8px}
+.maptools{position:absolute;right:12px;top:12px;display:flex;flex-direction:column;gap:6px;align-items:flex-end}
+.tog{display:flex;align-items:center;gap:8px;background:color-mix(in srgb,var(--panel) 92%,transparent);border:1px solid var(--line);border-radius:999px;padding:5px 10px;font-size:12px}
+.tog .sw{width:28px;height:16px;border-radius:99px;background:var(--line2);position:relative}
+.tog .sw::after{content:"";position:absolute;top:2px;left:2px;width:12px;height:12px;border-radius:50%;background:var(--fg);transition:transform .15s}
+.tog.on .sw{background:var(--ok)} .tog.on .sw::after{transform:translateX(12px);background:#fff}
+.mapov .coll{width:100%;display:flex;justify-content:space-between;align-items:center;margin-top:10px;padding-top:9px;border-top:1px solid var(--line);color:var(--mut);font-size:12.5px}
+.mapov .alog{margin-top:6px;display:grid;gap:6px;max-height:130px;overflow:auto}
+.mapov .alog div{font-size:12px;display:flex;gap:7px;align-items:flex-start}
+.pulse{animation:pulse 1.8s ease-out infinite;transform-origin:center;transform-box:fill-box}
+@keyframes pulse{0%{transform:scale(.6);opacity:.8}100%{transform:scale(2.4);opacity:0}}
+@media (prefers-reduced-motion:reduce){.pulse{animation:none;opacity:.35}}
+@media (max-width:760px){.mapov{position:static;width:auto;margin:10px;box-shadow:none}.maptools{display:none}}
+
+/* terminal */
+.term{background:#0a0c0e;color:#cfd6df;border:1px solid var(--line);border-radius:12px;font:12.5px/1.55 var(--mono);height:340px;overflow:auto;padding:12px 14px}
+:root[data-theme="light"] .term{background:#12161a}
+@media (prefers-color-scheme:light){:root:not([data-theme="dark"]) .term{background:#12161a}}
+.term .ln{padding:7px 0;border-bottom:1px dashed #20262d}
+.term .ts{color:#6f7a86}
+.term .pt{font-weight:600;padding:0 6px;border-radius:5px;margin:0 6px}
+.term .pt.ROUTINE{color:#8aa0b8;background:#1a212a}
+.term .pt.EVENT{color:#ffd37a;background:#2c2412}
+.term .pt.HUMAN{color:#9ad4ff;background:#12263a}
+.term .kv{color:#9fb0c2}
+.term .sub{padding-left:22px;color:#aab4c0}
+.term .sub i{font-style:normal;color:#6f7a86;display:inline-block;min-width:78px}
+.term .sub.act{color:#7ee0b0}
+.term .sev-crit .sub:not(.act){color:#ffb4ac}
+.term .sev-emergency{background:linear-gradient(90deg,rgba(255,107,94,.12),transparent)}
+.term .cur{display:inline-block;width:8px;height:14px;background:#7ee0b0;vertical-align:-2px;animation:blink 1s steps(2) infinite}
+@keyframes blink{to{opacity:0}}
+@media (prefers-reduced-motion:reduce){.term .cur{animation:none}}
+
+/* cargo */
+.truck{display:grid;grid-template-columns:70px minmax(0,1fr);gap:8px;align-items:stretch}
+.cab{background:var(--panel2);border:1px solid var(--line2);border-radius:14px 22px 22px 14px;display:grid;place-items:center;color:var(--dim);font:600 11px var(--mono);letter-spacing:1px;writing-mode:vertical-rl;transform:rotate(180deg)}
+.hold{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:8px;background:var(--panel2);border:1px dashed var(--line2);border-radius:16px;padding:10px}
+.slot{min-width:0;text-align:left;border-radius:11px;border:1.5px solid var(--line2);background:var(--panel);padding:8px 8px 7px;display:grid;gap:6px;min-height:78px;align-content:space-between;transition:transform .12s}
+.slot:hover{transform:translateY(-2px)}
+.slot .id{font:600 11.5px var(--mono);overflow:hidden;text-overflow:ellipsis}
+.slot.s-NORMAL{border-color:color-mix(in srgb,var(--ok) 60%,var(--line2))}
+.slot.s-UNDER_REVIEW{border-color:var(--warn);background:color-mix(in srgb,var(--warn) 9%,var(--panel))}
+.slot.s-QUARANTINED{border-color:var(--crit);background:color-mix(in srgb,var(--crit) 11%,var(--panel))}
+.slot.sel{box-shadow:0 0 0 2px var(--accent)}
+.legend{display:flex;gap:14px;flex-wrap:wrap;font-size:12px;color:var(--mut);margin-top:10px}
+.legend i{display:inline-block;width:10px;height:10px;border-radius:3px;margin-right:6px;vertical-align:-1px}
+.cam{border-radius:12px;overflow:hidden;border:1px solid var(--line);background:#06080a}
+.cam svg{display:block;width:100%;height:auto}
+
+/* packages */
+.plist{display:grid;gap:8px;max-height:640px;overflow:auto;padding-right:2px}
+.pk{width:100%;text-align:left;background:var(--panel2);border:1px solid var(--line);border-radius:14px;padding:11px 12px;display:grid;gap:7px}
+.pk.sel{border-color:var(--accent)}
+.pk .r{display:flex;gap:8px;align-items:center;justify-content:space-between;flex-wrap:wrap}
+.kvs{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px 16px}
+.kvs dt{font-size:11.5px;color:var(--dim)} .kvs dd{margin:1px 0 0;font-weight:500;overflow-wrap:anywhere}
+.warnbox{border:1px solid color-mix(in srgb,var(--warn) 45%,transparent);background:color-mix(in srgb,var(--warn) 10%,transparent);border-radius:12px;padding:10px 12px;font-size:13px}
+.critbox{border:1px solid color-mix(in srgb,var(--crit) 50%,transparent);background:color-mix(in srgb,var(--crit) 11%,transparent);border-radius:12px;padding:10px 12px;font-size:13px}
+.ovr{display:grid;gap:8px;margin-top:4px}
+.ovr input[type=text]{width:100%;background:var(--panel);border:1px solid var(--line2);border-radius:10px;padding:8px 10px}
+.filters{display:flex;gap:6px;flex-wrap:wrap}
+.filters button{padding:4px 11px;border-radius:999px;border:1px solid var(--line);color:var(--mut);font-size:12.5px}
+.filters button.on{border-color:var(--accent);color:var(--fg)}
+
+/* misc */
+.kpi{padding:14px 16px}
+.kpi .v{font-size:26px;font-weight:600;letter-spacing:-.5px}
+.kpi .l{font-size:12px;color:var(--mut)}
+.list{display:grid;gap:8px}
+.row{display:flex;gap:10px;align-items:center;justify-content:space-between;padding:10px 12px;background:var(--panel2);border:1px solid var(--line);border-radius:12px;flex-wrap:wrap}
+.tl{position:relative;display:grid;gap:12px;padding-left:18px}
+.tl::before{content:"";position:absolute;left:5px;top:6px;bottom:6px;width:2px;background:var(--line2)}
+.tl>div{position:relative}
+.tl>div::before{content:"";position:absolute;left:-18px;top:5px;width:10px;height:10px;border-radius:50%;background:var(--panel);border:2px solid var(--info)}
+.tl>div.crit::before{border-color:var(--crit)} .tl>div.ok::before{border-color:var(--ok)} .tl>div.warn::before{border-color:var(--warn)}
+.paper{background:#f7f6f1;color:#1b1b18;border-radius:12px;padding:20px;font:13px/1.55 var(--ui);position:relative;overflow:hidden}
+.paper h4{margin:0 0 4px;font-size:16px}
+.paper .stamp{position:absolute;right:-30px;top:20px;transform:rotate(18deg);border:2px solid #b3261e;color:#b3261e;font:700 11px var(--mono);padding:3px 38px;letter-spacing:1px}
+.paper table{width:100%;border-collapse:collapse;margin:8px 0}
+.paper td{padding:4px 6px;border-bottom:1px solid #dcdad0;vertical-align:top}
+.paper td:first-child{color:#6b6a60;width:34%}
+.toast{position:fixed;right:16px;top:calc(76px + env(safe-area-inset-top,0px));z-index:50;width:min(380px,calc(100% - 32px));display:grid;gap:8px}
+.toast .t{background:var(--panel);border:1px solid var(--line2);border-left:4px solid var(--crit);border-radius:12px;padding:11px 13px;box-shadow:var(--shadow);animation:slide .25s ease-out}
+.toast .t.warn{border-left-color:var(--warn)} .toast .t.info{border-left-color:var(--info)} .toast .t.ok{border-left-color:var(--ok)}
+@keyframes slide{from{transform:translateY(-8px);opacity:0}}
+.dock{position:fixed;left:50%;transform:translateX(-50%);bottom:calc(14px + env(safe-area-inset-bottom,0px));z-index:40;max-width:calc(100% - 24px);background:var(--panel);border:1px solid var(--line2);border-radius:18px;box-shadow:var(--shadow);padding:8px 10px;display:flex;gap:6px;align-items:center;overflow-x:auto}
+.dock .lab{font:600 10.5px var(--mono);letter-spacing:.8px;color:var(--dim);padding:0 6px;white-space:nowrap}
+.dock button.s{padding:6px 11px;border-radius:999px;border:1px solid var(--line);color:var(--mut);font-size:12.5px;white-space:nowrap}
+.dock button.s.on{background:var(--accent);color:var(--on-accent);border-color:transparent;font-weight:600}
+.note{font-size:12px;color:var(--dim)}
+.sr{position:absolute;left:-9999px}
+</style>
+
+<div class="app">
+  <nav class="rail" aria-label="Main">
+    <div class="mark" aria-hidden="true"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M12 2v20M4.2 6.5l15.6 11M19.8 6.5L4.2 17.5M8.5 3.8 12 7l3.5-3.2M8.5 20.2 12 17l3.5 3.2"/></svg></div>
+    <button class="on" data-act="tab" data-v="overview" title="Operations" aria-label="Operations"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="3" y="3" width="7" height="7" rx="2"/><rect x="14" y="3" width="7" height="7" rx="2"/><rect x="3" y="14" width="7" height="7" rx="2"/><rect x="14" y="14" width="7" height="7" rx="2"/></svg></button>
+    <button data-act="tab" data-v="cargo" title="Cargo" aria-label="Cargo"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M3 7l9-4 9 4v10l-9 4-9-4z"/><path d="M3 7l9 4 9-4M12 11v10"/></svg></button>
+    <button data-act="tab" data-v="route" title="Route" aria-label="Route"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="6" cy="18" r="2.5"/><circle cx="18" cy="6" r="2.5"/><path d="M8.5 18H15a3 3 0 0 0 0-6H9a3 3 0 0 1 0-6h6.5"/></svg></button>
+    <button data-act="tab" data-v="incidents" title="Incidents" aria-label="Incidents"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M12 3 2 20h20z"/><path d="M12 10v4M12 17.5v.01"/></svg></button>
+    <div class="sp"></div>
+    <button data-act="menu" data-v="settings" title="Settings" aria-label="Settings"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="12" cy="12" r="3"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3M4.9 4.9l2.1 2.1M17 17l2.1 2.1M19.1 4.9 17 7M7 17l-2.1 2.1"/></svg></button>
+  </nav>
+
+  <div class="wrap">
+    <header class="top">
+      <div class="brand"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="var(--accent)" stroke-width="2.4" stroke-linecap="round"><path d="M12 2v20M4.2 6.5l15.6 11M19.8 6.5L4.2 17.5"/></svg>ColdTrust</div>
+      <div class="search relw">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>
+        <input id="q" type="search" placeholder="Search packages, recipients, vehicles" autocomplete="off" aria-label="Global search">
+        <kbd>Ctrl K</kbd>
+        <div class="pop" id="qres" hidden style="left:0;right:0"></div>
+      </div>
+      <div class="seg" role="group" aria-label="Module">
+        <button data-act="module" data-v="delivery" class="on">Delivery</button>
+        <button data-act="module" data-v="logistics">Logistics</button>
+      </div>
+      <div class="chips" id="kpis"></div>
+      <div class="grow"></div>
+      <div class="relw">
+        <button class="ico-btn" data-act="menu" data-v="bell" aria-label="Notifications"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9"><path d="M6 9a6 6 0 1 1 12 0c0 6 2 7 2 7H4s2-1 2-7M10 20a2 2 0 0 0 4 0"/></svg><span class="n" id="bellN" hidden></span></button>
+        <div class="pop" id="pop-bell" hidden style="right:0;width:340px;max-width:calc(100vw - 32px)"></div>
+      </div>
+      <div class="relw">
+        <button class="me" data-act="menu" data-v="profile"><span class="av">LN</span><span style="text-align:left;line-height:1.2"><b style="font-weight:600">Lisa Nguyen</b><br><span class="mut" style="font-size:11.5px">Manager</span></span></button>
+        <div class="pop" id="pop-profile" hidden style="right:0;width:300px;max-width:calc(100vw - 32px)"></div>
+      </div>
+    </header>
+
+    <div class="ticker" aria-live="polite"><span class="lbl">ACTIVE ALERTS</span><div class="track"><div class="run" id="ticker"></div></div></div>
+
+    <div class="crumb">Dashboard / Fleet vehicles / <span id="crumbV">TX-9913-HX</span></div>
+    <div class="vhead">
+      <h1>TX-9913-HX</h1>
+      <span id="vstat"></span>
+      <span class="mut" style="padding-bottom:4px">Kenworth T680 · Dallas, TX to Memphis, TN</span>
+      <div class="grow"></div>
+      <button class="btn" data-act="toast-info" data-v="Maintenance request opened for TX-9913-HX (demo)">Maintenance</button>
+      <button class="btn" data-act="toast-info" data-v="Vehicle taken offline (demo)">Take Offline</button>
+      <button class="btn pri" data-act="toast-info" data-v="Route activated (demo)">Activate Route</button>
+    </div>
+    <div class="tabs" role="tablist" id="tabs"></div>
+
+    <main id="view"></main>
+  </div>
+</div>
+
+<div class="toast" id="toast" aria-live="assertive"></div>
+
+<div class="dock" role="group" aria-label="Demo scenario">
+  <span class="lab">SCENARIO</span>
+  <div id="dockBtns" style="display:flex;gap:6px"></div>
+  <span class="lab" style="border-left:1px solid var(--line);margin-left:4px;padding-left:12px">VOICE</span>
+  <button class="s" id="voiceBtn" data-act="voice" aria-pressed="false">Off</button>
+</div>
+
+<script>
+/* ============================== data ============================== */
+const PK = [
+ {id:'SHP-8841',d:'Vaccine vials',q:200,lo:2,hi:8,bud:30,pr:'Critical',w:1800,v:120,tags:['Fragile','Cold chain'],client:'Mercy Health Network',dest:'Memphis, TN',ord:1,tok:'7f3a9c21'},
+ {id:'SHP-4574',d:'Insulin pens',q:24,lo:2,hi:8,bud:45,pr:'High',w:4200,v:320,tags:['Fragile','Cold chain'],client:'TechFlow Pharmacy',dest:'Memphis, TN',ord:4,tok:'b04e51d8'},
+ {id:'SHP-9856',d:'Biologic samples',q:12,lo:2,hi:8,bud:20,pr:'Critical',w:2100,v:180,tags:['Fragile','Cold chain'],client:'Delta Research Lab',dest:'Jackson, MS',ord:3,tok:'2d96e7a0'},
+ {id:'SHP-8578',d:'Blood plasma bags',q:12,lo:2,hi:6,bud:15,pr:'Critical',w:2600,v:200,tags:['Cold chain'],client:"St. Luke's Hospital",dest:'Memphis, TN',ord:2,tok:'c81f0b36'},
+ {id:'SHP-2364',d:'Fresh salmon fillets',q:80,lo:0,hi:4,bud:60,pr:'Normal',w:3600,v:260,tags:['Perishable'],client:'Harbor Foods',dest:'Little Rock, AR',ord:6,tok:'51ae92cc'},
+ {id:'SHP-7841',d:'Yoghurt crates',q:120,lo:2,hi:6,bud:90,pr:'Normal',w:4800,v:340,tags:['Perishable'],client:'Green Valley Dairy',dest:'Little Rock, AR',ord:7,tok:'e7720a4b'},
+ {id:'SHP-1248',d:'Fresh berries',q:60,lo:1,hi:7,bud:120,pr:'Low',w:2400,v:250,tags:['Perishable','Fragile'],client:'FreshMart',dest:'Memphis, TN',ord:5,tok:'9c13d85f'},
+ {id:'SHP-8978',d:'Cut flowers',q:40,lo:2,hi:10,bud:240,pr:'Low',w:1500,v:300,tags:['Fragile'],client:'Bloom & Co',dest:'Jackson, MS',ord:8,tok:'30bb67e1'},
+ {id:'SHP-7801',d:'Sliced deli meats',q:50,lo:0,hi:5,bud:60,pr:'Normal',w:3000,v:220,tags:['Perishable'],client:'Metro Deli',dest:'Little Rock, AR',ord:9,tok:'a6c4f239'},
+ {id:'SHP-5678',d:'Ready meals',q:90,lo:0,hi:5,bud:90,pr:'High',w:2700,v:200,tags:['Perishable'],client:'CityEats',dest:'Memphis, TN',ord:10,tok:'6b8d10ee'}
+];
+const THERMAL_RISK={'SHP-8578':64,'SHP-9856':60,'SHP-8841':54,'SHP-4574':40,'SHP-2364':49,'SHP-7801':45,'SHP-5678':35,'SHP-7841':32,'SHP-1248':24,'SHP-8978':10};
+const THERMAL_OUT={'SHP-8578':31.8,'SHP-9856':26.7,'SHP-8841':26.7,'SHP-4574':26.7,'SHP-2364':37.1,'SHP-7801':34.5,'SHP-5678':34.5,'SHP-7841':31.8,'SHP-1248':29.2,'SHP-8978':21.4};
+const LABEL={NORMAL:'Normal',UNDER_REVIEW:'Under review',QUARANTINED:'Quarantined - do not accept'};
+const TONE={NORMAL:'ok',UNDER_REVIEW:'warn',QUARANTINED:'crit'};
+const PRIO={Critical:'crit',High:'warn',Normal:'info',Low:'mut'};
+const TOT_W=PK.reduce((a,p)=>a+p.w,0), TOT_V=PK.reduce((a,p)=>a+p.v,0);
+
+const SC={
+ normal:{name:'Normal drive',temp:3,hum:56,light:2,speed:58,fuel:62.4,prog:.42,zone:'En route, I-30 eastbound',veh:'En route',person:false,frame:'idle',
+   alerts:[],stat:()=>'NORMAL',risk:(p,i)=>3+i%5,out:()=>0,channels:null,incident:false,
+   block:null},
+ door:{name:'Door ajar',temp:6,hum:58,light:71,speed:58,fuel:62.1,prog:.5,zone:'I-30 eastbound (no authorised stop)',veh:'En route',person:false,frame:'door',
+   alerts:[{id:'a1',sev:'crit',title:'Door ajar',text:'Cargo light 71% for 42 s while moving'}],stat:()=>'UNDER_REVIEW',risk:(p,i)=>36+i%5,out:(p)=>p.lo<=3?1.2:0.4,
+   voice:'Warning. Bright light in the cargo hold. Check that the rear door is closed.',
+   channels:{voice:1.4,tg:1.9},incident:true,
+   block:{type:'EVENT',sev:'crit',params:'trigger=LIGHT temp=6C hum=58% light=71% seq=2041 speed=58mph zone=none',
+     find:'LIGHT_BRIGHT (critical), TEMP_RATE +0.9 C/min (warning)',
+     reason:'Cargo light appeared while the vehicle was moving outside any authorised stop. No person detected in frame. Temperature is rising, so the door may be ajar rather than open for handling.',
+     action:'10 packages: status -> UNDER REVIEW | driver + admin alerted by voice and Telegram | frame captured (SHA-256 4be1...a90c)'}},
+ theft:{name:'Theft suspected',temp:4,hum:57,light:74,speed:52,fuel:61.8,prog:.55,zone:'I-30 high-risk stretch',veh:'Stopped, alarm',person:true,frame:'theft',
+   alerts:[{id:'a1',sev:'crit',title:'Theft suspected',text:'Light + person in cargo hold outside authorised stop'},{id:'a2',sev:'warn',title:'Custody tokens revoked',text:'10 packages quarantined'}],
+   stat:()=>'QUARANTINED',risk:(p,i)=>90+i%8,out:()=>0,
+   voice:'Emergency. Possible theft in the cargo hold. Evidence is being captured.',
+   channels:{voice:1.2,tg:1.7},incident:true,
+   block:{type:'EVENT',sev:'emergency',params:'trigger=LIGHT temp=4C hum=57% light=74% seq=2058 speed=52mph zone=I-30-risk person_in_frame=true',
+     find:'LIGHT_BRIGHT (critical), camera: person present (conf 0.93)',
+     reason:'Bright light and a person in the hold camera outside an authorised stop: treated as unauthorised access. Temperature is still in range, so the integrity risk is tampering, not thermal.',
+     action:'10 packages: status -> QUARANTINED - DO NOT ACCEPT | 10 custody tokens revoked | evidence pack INC-0413 drafted for human review'}},
+ thermal:{name:'Compressor failure',temp:11,hum:61,light:2,speed:61,fuel:61.0,prog:.62,zone:'En route, I-40 eastbound',veh:'En route',person:false,frame:'idle',
+   alerts:[{id:'a1',sev:'crit',title:'Temperature 11 C',text:'2 packages past excursion budget, 8 under review'}],
+   stat:(p)=>(p.id==='SHP-8578'||p.id==='SHP-9856')?'QUARANTINED':'UNDER_REVIEW',risk:(p)=>THERMAL_RISK[p.id],out:(p)=>THERMAL_OUT[p.id],
+   voice:'Warning. Cargo temperature is outside safe limits. Check refrigeration.',
+   channels:{voice:1.5,tg:2.1},incident:true,
+   block:{type:'EVENT',sev:'crit',params:'trigger=RATE temp=11C hum=61% light=2% seq=2102 slope=+0.38C/min speed=61mph',
+     find:'TEMP_THRESHOLD (critical), TEMP_RATE +0.38 C/min (warning)',
+     reason:'Hold has been above 8 C for 26 min and is still climbing with the door closed. That pattern points to refrigeration failure, not handling. Blood plasma (budget 15 min) and biologic samples (20 min) have used their full excursion budget.',
+     action:'SHP-8578, SHP-9856: status -> QUARANTINED, tokens revoked | 8 others -> UNDER REVIEW | maintenance warning raised'}},
+ auth:{name:'Authorised stop',temp:3,hum:56,light:70,speed:0,fuel:61.5,prog:.97,zone:'Memphis Dock 4 (authorised)',veh:'At dock',person:true,frame:'auth',
+   alerts:[],stat:()=>'NORMAL',risk:(p)=>p.tags.includes('Cold chain')?15:0,out:()=>0,channels:null,incident:false,
+   block:{type:'EVENT',sev:'info',params:'trigger=LIGHT temp=3C hum=56% light=70% seq=2077 speed=0mph zone=Memphis-Dock-4',
+     find:'LIGHT_BRIGHT (warning, authorised stop)',
+     reason:'Door and light activity inside the Memphis Dock 4 geofence during the delivery window. Logged as authorised handling; no status change and no alert sent.',
+     action:'No change | event logged | camera clip kept for the handoff record'}},
+ replay:{name:'Replay attack',temp:3,hum:56,light:2,speed:58,fuel:62.2,prog:.45,zone:'En route, I-30 eastbound',veh:'En route',person:false,frame:'idle',
+   alerts:[{id:'a1',sev:'warn',title:'Telemetry rejected',text:'Replayed payload seq 2041 (already seen)'}],stat:()=>'NORMAL',risk:(p,i)=>3+i%5,out:()=>0,
+   voice:'Warning. A telemetry payload failed integrity checks and was rejected.',channels:{voice:1.1,tg:1.6},incident:false,
+   block:{type:'EVENT',sev:'crit',params:'REJECTED_REPLAY_SEQUENCE device=CC-001 seq=2041 last_seq=2043',
+     find:'REPLAY_SEQUENCE (critical)',
+     reason:'Sequence 2041 is not newer than 2043, so this is a resent capture. The payload was discarded and no reading was stored.',
+     action:'Payload discarded | no package status changed | admin notified once (60 s cooldown)'}},
+ spoof:{name:'Spoofed sensor',temp:3,hum:56,light:72,speed:60,fuel:61.9,prog:.5,zone:'I-30 eastbound',veh:'En route',person:false,frame:'door',
+   alerts:[{id:'a1',sev:'crit',title:'Contradictory telemetry',text:'Door open 7 min in 31 C heat, hold temperature perfectly flat'}],
+   stat:()=>'UNDER_REVIEW',risk:()=>50,out:()=>0,
+   voice:'Warning. Sensor data is contradictory and may be spoofed.',channels:{voice:1.3,tg:1.8},incident:true,
+   block:{type:'EVENT',sev:'crit',params:'temp=3C light=72% bright_s=420 ambient=31C seq=2090',
+     find:'DOOR_OPEN_NO_THERMAL_RESPONSE (critical)',
+     reason:'Light says the door has been open for 7 minutes in 31 C weather, yet the hold temperature has not moved. Both cannot be true, so the sensor data cannot be trusted.',
+     action:'10 packages -> UNDER REVIEW | inspect the node physically; cross-check with a handheld thermometer'}}
+};
+
+/* ============================== state ============================== */
+const S={tab:'overview',scen:'normal',sel:'SHP-4574',filter:'all',module:'delivery',voice:false,ov:{},acked:{},log:[],menu:null,
+         mapRoutes:true,mapAlerts:true,mapFences:true,alogOpen:true,reassign:false,approved:false,reviewed:false,incSel:0,ovStatus:'UNDER_REVIEW'};
+const clock=(off=0)=>{const d=new Date(Date.now()-off*1000);return d.toTimeString().slice(0,8)};
+S.log=[
+ {ts:clock(1800),type:'ROUTINE',sev:'info',params:'temp=3C hum=55% light=2% seq=2036 n=12',reason:'All readings within limits.'},
+ {ts:clock(900),type:'ROUTINE',sev:'info',params:'temp=3C hum=56% light=2% seq=2037 n=30',reason:'All readings within limits.'},
+ {ts:clock(300),type:'ROUTINE',sev:'info',params:'temp=3C hum=56% light=3% seq=2038 n=10',reason:'All readings within limits. Cooling recovery 4.1 min after the last door event.'}
+];
+
+/* ============================== helpers ============================== */
+const $=s=>document.querySelector(s), $$=s=>[...document.querySelectorAll(s)];
+const esc=s=>String(s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+const sc=()=>SC[S.scen];
+const status=(p)=>S.ov[p.id]||sc().stat(p);
+const riskOf=(p,i)=>{const r=sc().risk(p,i);return S.ov[p.id]==='NORMAL'?Math.min(r,25):r};
+const pill=(tone,text,dot=true)=>`<span class="pill t-${tone}">${dot?'<i></i>':''}${esc(text)}</span>`;
+const worst=()=>PK.map(status).reduce((a,s)=>['NORMAL','UNDER_REVIEW','QUARANTINED'].indexOf(s)>['NORMAL','UNDER_REVIEW','QUARANTINED'].indexOf(a)?s:a,'NORMAL');
+const counts=()=>{const c={NORMAL:0,UNDER_REVIEW:0,QUARANTINED:0};PK.forEach(p=>c[status(p)]++);return c};
+const activeAlerts=()=>sc().alerts.filter(a=>!S.acked[S.scen+a.id]);
+const fmt=n=>n.toLocaleString('en-US');
+
+function polar(cx,cy,r,deg){const a=(deg-90)*Math.PI/180;return [cx+r*Math.cos(a),cy+r*Math.sin(a)]}
+function arc(cx,cy,r,a0,a1){const [x0,y0]=polar(cx,cy,r,a0),[x1,y1]=polar(cx,cy,r,a1);return `M${x0.toFixed(1)} ${y0.toFixed(1)}A${r} ${r} 0 ${a1-a0>180?1:0} 1 ${x1.toFixed(1)} ${y1.toFixed(1)}`}
+/* 240-degree gauge, -120..+120 */
+function gauge({v,min,max,unit,label,color,band,mark,size=150,sub}){
+  const A0=-120,A1=120,f=x=>A0+(A1-A0)*Math.max(0,Math.min(1,(x-min)/(max-min)));
+  const cx=75,cy=78,r=56;
+  let s=`<svg viewBox="0 0 150 128" width="100%" style="max-width:${size}px" role="img" aria-label="${esc(label)} ${v} ${unit}">`;
+  s+=`<path d="${arc(cx,cy,r,A0,A1)}" stroke="var(--line2)" stroke-width="10" fill="none" stroke-linecap="round"/>`;
+  if(band)s+=`<path d="${arc(cx,cy,r,f(band[0]),f(band[1]))}" stroke="color-mix(in srgb,var(--ok) 55%,transparent)" stroke-width="10" fill="none"/>`;
+  s+=`<path d="${arc(cx,cy,r,A0,Math.max(A0+1,f(v)))}" stroke="${color}" stroke-width="10" fill="none" stroke-linecap="round"/>`;
+  if(mark!=null){const [x0,y0]=polar(cx,cy,r-9,f(mark)),[x1,y1]=polar(cx,cy,r+9,f(mark));s+=`<line x1="${x0}" y1="${y0}" x2="${x1}" y2="${y1}" stroke="var(--fg)" stroke-width="2"/>`}
+  s+=`<text x="${cx}" y="${cy+4}" text-anchor="middle" font-size="26" font-weight="600" fill="var(--fg)" font-family="var(--ui)">${v}</text>`;
+  s+=`<text x="${cx}" y="${cy+21}" text-anchor="middle" font-size="11" fill="var(--mut)" font-family="var(--ui)">${unit}</text>`;
+  s+=`<text x="${cx}" y="122" text-anchor="middle" font-size="11" fill="var(--mut)" font-family="var(--ui)">${esc(label)}${sub?' · '+esc(sub):''}</text></svg>`;
+  return s;
+}
+function seeded(n,seed){let x=seed;return Array.from({length:n},()=>{x=(x*9301+49297)%233280;return x/233280})}
+function tempSeries(n=60){
+  const k=S.scen,r=seeded(n,7);
+  return Array.from({length:n},(_,i)=>{
+    const t=i/(n-1);let v=3+(r[i]-.5)*.9;
+    if(k==='door'&&t>.55)v+= (t-.55)/.45*3.2;
+    if(k==='theft'&&t>.6)v+=(t-.6)/.4*1.2;
+    if(k==='thermal'&&t>.15)v+=(t-.15)/.85*8.2;
+    return Math.round(v*10)/10});
+}
+function lineChart(series,{w=520,h=150,min=0,max=14,band=[2,8],unit='°C',labels=null}={}){
+  const pl=34,pr=10,pt=10,pb=22,X=i=>pl+(w-pl-pr)*i/(series.length-1),Y=v=>pt+(h-pt-pb)*(1-(v-min)/(max-min));
+  let s=`<svg viewBox="0 0 ${w} ${h}" width="100%" role="img" aria-label="Temperature trend">`;
+  if(band)s+=`<rect x="${pl}" y="${Y(band[1])}" width="${w-pl-pr}" height="${Y(band[0])-Y(band[1])}" fill="color-mix(in srgb,var(--ok) 11%,transparent)"/>`;
+  for(let g=min;g<=max;g+=Math.ceil((max-min)/4)){s+=`<line x1="${pl}" x2="${w-pr}" y1="${Y(g)}" y2="${Y(g)}" stroke="var(--line)" stroke-dasharray="3 4"/><text x="${pl-6}" y="${Y(g)+4}" text-anchor="end" font-size="10.5" fill="var(--dim)">${g}</text>`}
+  const pts=series.map((v,i)=>`${X(i).toFixed(1)},${Y(v).toFixed(1)}`).join(' ');
+  s+=`<polygon points="${pl},${h-pb} ${pts} ${w-pr},${h-pb}" fill="color-mix(in srgb,var(--info) 14%,transparent)"/><polyline points="${pts}" fill="none" stroke="var(--info)" stroke-width="2" stroke-linejoin="round"/>`;
+  const lx=X(series.length-1),ly=Y(series[series.length-1]);
+  s+=`<circle cx="${lx}" cy="${ly}" r="4.5" fill="var(--info)" stroke="var(--panel)" stroke-width="2"/>`;
+  (labels||['-30 min','-20','-10','now']).forEach((t,i,a)=>{s+=`<text x="${pl+(w-pl-pr)*i/(a.length-1)}" y="${h-5}" text-anchor="${i===0?'start':i===a.length-1?'end':'middle'}" font-size="10.5" fill="var(--dim)">${t}</text>`});
+  return s+'</svg>';
+}
+
+/* ---- map ---- */
+const FENCES=[{n:'Dallas Depot',x:92,y:338,r:30,ok:true},{n:'Little Rock Dock 2',x:470,y:196,r:26,ok:true},{n:'Memphis Dock 4',x:700,y:92,r:28,ok:true},{n:'I-30 high-risk stretch',x:330,y:262,r:46,ok:false}];
+function mapSVG(){
+  const k=S.scen,c=sc();
+  let s=`<svg viewBox="0 0 800 440" id="mapsvg" role="img" aria-label="Route map">
+  <rect width="800" height="440" fill="var(--map)"/>
+  <g stroke="var(--road)" fill="none" stroke-linecap="round">
+   <path d="M0 80 C140 90 220 40 330 70 S560 150 800 120" stroke-width="3"/>
+   <path d="M0 250 C120 230 200 300 320 270 S600 200 800 250" stroke-width="3"/>
+   <path d="M120 0 C140 120 100 240 150 440" stroke-width="3"/>
+   <path d="M420 0 C400 130 460 280 430 440" stroke-width="3"/>
+   <path d="M650 0 C640 110 700 260 660 440" stroke-width="3"/>
+   <path d="M0 160 H800M0 340 H800M230 0V440M560 0V440M760 0V440" stroke-width="1.2" stroke="var(--road2)" opacity=".55"/>
+   <path d="M40 410 C200 370 300 400 420 370 S640 330 800 380" stroke="color-mix(in srgb,var(--info) 25%,var(--map))" stroke-width="16" opacity=".5"/>
+  </g>`;
+  if(S.mapFences)FENCES.forEach(f=>{const col=f.ok?'var(--ok)':'var(--warn)';
+    s+=`<circle cx="${f.x}" cy="${f.y}" r="${f.r}" fill="color-mix(in srgb,${col} 10%,transparent)" stroke="${col}" stroke-dasharray="5 5"/><text x="${f.x}" y="${f.y+f.r+14}" text-anchor="middle" font-size="11" fill="var(--mut)">${f.n}</text>`});
+  const d="M92 338 C170 300 240 320 330 262 S430 220 470 196 S620 150 700 92";
+  s+=`<path id="routep" d="${d}" fill="none" stroke="var(--line2)" stroke-width="5" stroke-linecap="round"/>`;
+  if(S.mapRoutes)s+=`<path id="routed" d="${d}" fill="none" stroke="var(--accent)" stroke-width="3.5" stroke-linecap="round" stroke-dasharray="1 0"/><path d="${d}" fill="none" stroke="var(--map)" stroke-width="3.6" stroke-dasharray="10 9" opacity=".0"/>`;
+  [[92,338,'A'],[470,196,'B'],[700,92,'C']].forEach(([x,y,t])=>{s+=`<circle cx="${x}" cy="${y}" r="9" fill="var(--panel)" stroke="var(--fg)" stroke-width="1.5"/><text x="${x}" y="${y+4}" text-anchor="middle" font-size="10.5" font-weight="700" fill="var(--fg)">${t}</text>`});
+  if(S.mapAlerts&&activeAlerts().length)s+=`<g id="alertpin"></g>`;
+  s+=`<g id="truck"></g>`;
+  /* compass */
+  s+=`<g transform="translate(742,386)"><circle r="30" fill="var(--panel)" stroke="var(--line2)"/><text y="-14" text-anchor="middle" font-size="10" fill="var(--mut)">N</text><path d="M0 -8 L5 8 L0 4 L-5 8Z" fill="var(--accent)" transform="rotate(-38)"/><text y="22" text-anchor="middle" font-size="10" font-weight="700" fill="var(--fg)">NW</text></g>`;
+  return s+'</svg>';
+}
+function placeTruck(){
+  const p=$('#routep'),t=$('#truck');if(!p||!t)return;
+  const L=p.getTotalLength(),pt=p.getPointAtLength(L*sc().prog),a=SC[S.scen].alerts.length&&activeAlerts().length;
+  const col=a?'var(--crit)':'var(--accent)';
+  t.innerHTML=`<circle class="pulse" cx="${pt.x}" cy="${pt.y}" r="16" fill="${col}"/><circle cx="${pt.x}" cy="${pt.y}" r="9" fill="${col}" stroke="var(--panel)" stroke-width="3"/><path d="M${pt.x-4} ${pt.y+3}l4 -8 4 8z" fill="var(--panel)"/>`;
+  const d=$('#routed');if(d){d.setAttribute('stroke-dasharray',`${L*sc().prog} ${L}`)}
+  const ap=$('#alertpin');if(ap)ap.innerHTML=`<g transform="translate(${pt.x+14},${pt.y-30})"><rect width="124" height="22" rx="11" fill="var(--crit)"/><text x="62" y="15" text-anchor="middle" font-size="11" font-weight="700" fill="#fff">${esc(activeAlerts()[0].title.slice(0,18))}</text></g>`;
+}
+
+/* ---- camera frame ---- */
+function frameSVG(kind,tsLabel,i=0){
+  const lit=kind==='door'||kind==='theft'||kind==='auth';
+  let s=`<svg viewBox="0 0 320 180" role="img" aria-label="Cargo camera frame: ${kind}"><defs><linearGradient id="g${i}" x1="0" x2="0" y1="0" y2="1"><stop offset="0" stop-color="#0b0e12"/><stop offset="1" stop-color="#05070a"/></linearGradient>
+   <radialGradient id="l${i}" cx=".5" cy=".5" r=".6"><stop offset="0" stop-color="#fff6d6" stop-opacity=".9"/><stop offset="1" stop-color="#fff6d6" stop-opacity="0"/></radialGradient></defs>
+   <rect width="320" height="180" fill="url(#g${i})"/>
+   <path d="M30 20 H290 L260 150 H60Z" fill="#0f1318" stroke="#1f262e"/>
+   <g fill="#161b21" stroke="#252c35"><rect x="78" y="60" width="52" height="40"/><rect x="136" y="60" width="52" height="40"/><rect x="194" y="60" width="48" height="40"/><rect x="92" y="104" width="64" height="36"/><rect x="162" y="104" width="64" height="36"/></g>`;
+  if(lit)s+=`<ellipse cx="160" cy="100" rx="130" ry="90" fill="url(#l${i})"/><rect x="40" y="26" width="240" height="6" fill="#fff6d6" opacity=".85"/>`;
+  if(kind==='theft'||kind==='auth'){
+    const c=kind==='theft'?'#ff6b5e':'#3fcf8e';
+    s+=`<g><circle cx="168" cy="72" r="11" fill="#2a313a"/><rect x="152" y="84" width="32" height="56" rx="12" fill="#2a313a"/><rect x="142" y="52" width="52" height="94" fill="none" stroke="${c}" stroke-width="1.6" stroke-dasharray="5 3"/>
+     <rect x="142" y="38" width="${kind==='theft'?96:112}" height="14" fill="${c}"/><text x="147" y="49" font-size="10" font-weight="700" fill="#0b0e12" font-family="monospace">${kind==='theft'?'person 0.93':'authorised stop'}</text></g>`;
+  }
+  s+=`<circle cx="14" cy="14" r="4.5" fill="#ff4d4d"/><text x="24" y="18" font-size="10" fill="#d7dde5" font-family="monospace">REC  CAM-01</text>
+      <text x="306" y="18" text-anchor="end" font-size="10" fill="#d7dde5" font-family="monospace">${tsLabel}</text>`;
+  if(kind==='idle')s+=`<text x="160" y="170" text-anchor="middle" font-size="10" fill="#6f7a86" font-family="monospace">no motion · hold dark</text>`;
+  return s+'</svg>';
+}
+
+/* ============================== views ============================== */
+function statusCard(){
+  const c=sc(),t=c.temp,out=t<2||t>8;
+  const tcol=out?'var(--crit)':(S.scen==='door'?'var(--warn)':'var(--ok)');
+  return `<div class="card"><div class="h"><h3>Cargo climate</h3><span class="grow"></span>${pill(out?'crit':'ok',out?'Outside limits':'In range')}</div>
+   <div class="b"><div class="gauges" style="margin-top:0">${gauge({v:t,min:0,max:15,unit:'°C',label:'Temperature',color:tcol,band:[2,8],sub:'limits 2–8'})}
+   ${gauge({v:c.light,min:0,max:100,unit:'% light',label:'Ambient light',color:c.light>=30?'var(--crit)':'var(--ok)',mark:30,sub:'alarm ≥30'})}</div>
+   <div class="note" style="margin-top:8px">DHT11 sampled every 5 s · logged every 30 s · routine ping every 15 min · event ping instant</div></div></div>`;
+}
+function cameraCard(){
+  const c=sc(),ts=clock(0);
+  return `<div class="card"><div class="h"><h3>Cargo camera</h3><span class="grow"></span>${c.frame==='idle'?pill('ok','Live'):pill('crit','Evidence captured')}</div>
+   <div class="b"><div class="cam">${frameSVG(c.frame,ts,1)}</div>
+   <div class="row" style="margin-top:10px;font-size:12.5px"><span class="mut">Latest capture</span><span class="mono">${c.frame==='idle'?'rolling buffer 30 s':'SHA-256 4be1…a90c'}</span></div>
+   ${c.frame!=='idle'&&c.frame!=='auth'?`<button class="btn sm" style="margin-top:8px" data-act="tab" data-v="incidents">Open incident pack</button>`:''}</div></div>`;
+}
+function termCard(){
+  const lines=S.log.map(b=>`<div class="ln sev-${b.sev}"><span class="ts">${b.ts}</span><span class="pt ${b.type}">${b.type}</span><span class="kv">${esc(b.params)}</span>
+    ${b.find?`<div class="sub"><i>findings</i>${esc(b.find)}</div>`:''}<div class="sub"><i>reasoning</i>${esc(b.reason)}</div>${b.action?`<div class="sub act"><i>action</i>${esc(b.action)}</div>`:''}</div>`).join('');
+  return `<div class="card"><div class="h"><h3>Agent reasoning &amp; audit log</h3><span class="grow"></span>
+   <span class="chip">Rules decide status · <b>Claude explains</b></span></div>
+   <div class="b"><div class="term" id="term" tabindex="0" aria-label="Agent audit log">${lines}<span class="cur"></span></div></div></div>`;
+}
+function channelsCard(){
+  const ch=sc().channels;
+  const row=(n,on,t)=>`<div class="row"><span>${n}</span>${on?pill('ok',t):pill('mut','Standby',false)}</div>`;
+  return `<div class="card"><div class="h"><h3>Alert delivery</h3><span class="grow"></span>${ch?`<span class="chip">event to alert <b class="tn">${ch.voice.toFixed(1)} s</b></span>`:''}</div>
+   <div class="b list">${row('Voice · driver phone',!!ch,ch?`Spoken ${ch.voice.toFixed(1)} s`:'')}${row('Voice · admin console',!!ch,ch?`Spoken ${ch.voice.toFixed(1)} s`:'')}${row('Telegram · driver + admin',!!ch,ch?`Sent ${ch.tg.toFixed(1)} s`:'')}
+   <div class="note">Driver acknowledges on the phone page; unacknowledged alerts repeat and escalate to the admin.</div></div></div>`;
+}
+function overlay(){
+  const c=sc(),al=activeAlerts();
+  return `<div class="mapov"><div style="display:flex;justify-content:space-between;gap:8px;align-items:flex-start"><div><h4>TX-9913-HX</h4><div class="mut" style="font-size:12.5px">${esc(c.zone)}</div></div>${pill(c.veh==='En route'?'ok':c.veh==='At dock'?'info':'crit',c.veh)}</div>
+   <div class="gauges">${gauge({v:c.speed,min:0,max:120,unit:'mph',label:'Speed',color:'var(--accent)',size:120})}${gauge({v:c.fuel.toFixed(0),min:0,max:100,unit:'gal',label:'Fuel',color:'var(--info)',size:120})}</div>
+   <div class="row" style="margin-top:6px"><span><b>Marcus Lee</b><br><span class="mut mono" style="font-size:12px">DRV-20418</span></span><span class="mut" style="font-size:12px">Dallas → Memphis<br>ETA 1 h 8 m · 72.9 mi</span></div>
+   <button class="coll" data-act="alog"><span>Alerts and notifications (${al.length})</span><span>${S.alogOpen?'Hide':'Show'}</span></button>
+   ${S.alogOpen?`<div class="alog">${al.length?al.map(a=>`<div>${pill(a.sev==='crit'?'crit':'warn',a.sev==='crit'?'Critical':'Warning',false)}<span><b>${esc(a.title)}</b><br><span class="mut">${esc(a.text)}</span></span></div>`).join(''):'<div class="mut">No active alerts.</div>'}</div>`:''}</div>
+   <div class="maptools"><button class="tog ${S.mapRoutes?'on':''}" data-act="mt" data-v="mapRoutes">Show routes <span class="sw"></span></button><button class="tog ${S.mapFences?'on':''}" data-act="mt" data-v="mapFences">Geofences <span class="sw"></span></button><button class="tog ${S.mapAlerts?'on':''}" data-act="mt" data-v="mapAlerts">Show alerts <span class="sw"></span></button></div>`;
+}
+function vOverview(){
+  return `<div class="g g2"><div class="g">
+     <div class="card"><div class="h"><h3>Operations map</h3><span class="grow"></span><span class="note">Interactive map with live vehicle position, route and transit geofences</span></div>
+       <div class="b"><div class="map">${mapSVG()}${overlay()}</div></div></div>
+     ${termCard()}</div>
+   <div class="g" style="align-content:start">${statusCard()}${cameraCard()}${channelsCard()}</div></div>`;
+}
+function slot(p){
+  const st=status(p);
+  return `<button class="slot s-${st} ${S.sel===p.id?'sel':''}" data-act="pick" data-v="${p.id}"><span class="id">${p.id}</span><span class="mut" style="font-size:11.5px;line-height:1.2">${esc(p.d)}</span>
+   <span style="display:flex;gap:5px;flex-wrap:wrap">${pill(TONE[st],st==='NORMAL'?'Normal':st==='UNDER_REVIEW'?'Review':'Quarantined',false)}</span></button>`;
+}
+function vCargo(){
+  const c=counts(),vp=TOT_V/2400*100,wp=TOT_W/44000*100;
+  const series=tempSeries();
+  const shown=PK.filter(p=>(S.filter==='all'||status(p)===S.filter)&&matches(p));
+  return `<div class="g gcargo"><div class="g">
+    <div class="card"><div class="h"><h3>Cargo layout</h3>${pill(c.QUARANTINED?'crit':c.UNDER_REVIEW?'warn':'ok',c.QUARANTINED?`${c.QUARANTINED} quarantined`:c.UNDER_REVIEW?`${c.UNDER_REVIEW} under review`:'All normal')}<span class="grow"></span><span class="chip">Fully loaded</span></div>
+     <div class="b"><div class="g g3" style="gap:16px">
+        <div><div class="row" style="background:none;border:0;padding:0"><span class="mut">Weight</span><b class="tn">${fmt(TOT_W)} / 44,000 lbs</b></div><div class="bar" style="margin-top:6px"><i style="width:${wp}%"></i></div></div>
+        <div><div class="row" style="background:none;border:0;padding:0"><span class="mut">Volume</span><b class="tn">${fmt(TOT_V)} / 2,400 ft³</b></div><div class="bar" style="margin-top:6px"><i style="width:${vp}%;background:var(--warn)"></i></div></div>
+        <div><div class="row" style="background:none;border:0;padding:0"><span class="mut">Packages</span><b class="tn">10 / 10 items</b></div><div class="bar" style="margin-top:6px"><i style="width:100%;background:var(--ok)"></i></div></div></div>
+       <div class="truck" style="margin-top:16px"><div class="cab">CAB</div><div class="hold" aria-label="Cargo hold, rear at right">${PK.slice().sort((a,b)=>a.ord-b.ord).map(slot).join('')}</div></div>
+       <div class="legend"><span><i style="background:var(--ok)"></i>Normal</span><span><i style="background:var(--warn)"></i>Under review</span><span><i style="background:var(--crit)"></i>Quarantined</span><span class="dim">Loading order 1 (front) to 10 (rear door)</span></div></div></div>
+    <div class="g g3" style="gap:14px"><div style="grid-column:span 2" class="g">${statusCard()}</div><div class="card"><div class="h"><h3>Trend, 30 min</h3></div><div class="b">${lineChart(series,{w:300,h:170})}</div></div></div>
+    ${cameraCard()}</div>
+   <div class="card" style="align-self:start"><div class="h"><h3>Packages</h3><span class="grow"></span>
+       <span class="chip">Items <b class="tn">10/10</b></span><span class="chip">Weight <b class="tn">${fmt(TOT_W)} lbs</b></span><span class="chip">Capacity <b class="tn">44,000 lbs</b></span></div>
+     <div class="b"><div class="filters" style="margin-bottom:10px">${[['all','All'],['NORMAL','Normal'],['UNDER_REVIEW','Review'],['QUARANTINED','Quarantined']].map(([k,t])=>`<button class="${S.filter===k?'on':''}" data-act="filter" data-v="${k}">${t}${k==='all'?'':' '+c[k]}</button>`).join('')}</div>
+     <div class="plist">${shown.length?shown.map(pkCard).join(''):'<div class="mut">No packages match.</div>'}</div></div></div></div>`;
+}
+let QTEXT='';
+const matches=p=>!QTEXT||[p.id,p.d,p.client,p.dest].some(x=>x.toLowerCase().includes(QTEXT));
+function pkCard(p){
+  const i=PK.indexOf(p),st=status(p),r=riskOf(p,i),open=S.sel===p.id;
+  const head=`<div class="r"><span><b class="mono">${p.id}</b> <span class="mut">${esc(p.d)} ×${p.q}</span></span>${pill(PRIO[p.pr],p.pr,false)}</div>
+    <div class="r"><span class="chips">${p.tags.map(t=>`<span class="tag">${t}</span>`).join('')}</span>${pill(TONE[st],LABEL[st].split(' - ')[0])}</div>
+    <div class="r mut" style="font-size:12.5px">${S.module==='delivery'?`<span>${esc(p.client)} → ${esc(p.dest)}</span>`:`<span class="tn">${fmt(p.w)} lbs · ${p.v} ft³ · load #${p.ord}</span>`}<span class="tn">risk ${r}</span></div>`;
+  return `<div class="pk ${open?'sel':''}"><button data-act="pick" data-v="${p.id}" style="text-align:left;display:grid;gap:7px;width:100%" aria-expanded="${open}">${head}</button>${open?pkDetail(p,st,r):''}</div>`;
+}
+function pkDetail(p,st,r){
+  const out=sc().out(p)||0,used=Math.min(100,out/(p.bud*1)*100);
+  const tok=st==='QUARANTINED'?'revoked':'valid';
+  return `<dl class="kvs" style="margin:6px 0 0"><div><dt>Client</dt><dd>${esc(p.client)}</dd></div><div><dt>Loading order</dt><dd>#${p.ord}</dd></div>
+     <div><dt>Destination</dt><dd>${esc(p.dest)}</dd></div><div><dt>Temperature limits</dt><dd class="tn">${p.lo}–${p.hi} °C</dd></div>
+     <div><dt>Weight / volume</dt><dd class="tn">${fmt(p.w)} lbs · ${p.v} ft³</dd></div><div><dt>Excursion budget</dt><dd class="tn">${out.toFixed(1)} of ${p.bud} min</dd></div></dl>
+     <div><div class="row" style="background:none;border:0;padding:0"><span class="mut">Risk score</span><b class="tn">${r} / 100</b></div><div class="bar" style="margin-top:5px"><i style="width:${r}%;background:${r>=70?'var(--crit)':r>=30?'var(--warn)':'var(--ok)'}"></i></div></div>
+     <div class="row"><span><span class="mut">Custody token</span> <span class="mono">${p.tok.slice(0,4)}…${p.tok.slice(-2)}</span></span>${pill(tok==='valid'?'ok':'crit',tok==='valid'?'Valid · scan to accept':'Revoked · blocks acceptance')}</div>
+     ${st==='QUARANTINED'?`<div class="critbox"><b>Do not accept.</b> Custody token revoked by the agent. Only a supervisor override can re-issue it.</div>`:
+       p.tags.includes('Fragile')?`<div class="warnbox"><b>Fragile.</b> Handle with care. Shock-absorbing packaging required.</div>`:`<div class="warnbox"><b>Keep within ${p.lo}–${p.hi} °C.</b> Do not accept if quarantined.</div>`}
+     <div style="display:flex;gap:8px;flex-wrap:wrap"><button class="btn sm" data-act="tab" data-v="route">View Route</button><button class="btn sm" data-act="reassign">Reassign to Another Truck</button></div>
+     ${S.reassign?`<div class="row"><span class="mut">Move to</span><select id="rtruck" aria-label="Target truck" style="background:var(--panel);border:1px solid var(--line2);border-radius:8px;padding:5px 8px"><option>TX-2210-HX (idle, 61% full)</option><option>TX-7745-HX (loading, 30% full)</option></select><button class="btn sm pri" data-act="reassign-ok" data-v="${p.id}">Confirm</button></div>`:''}
+     <div class="ovr"><div class="mut" style="font-size:12px">Supervisor override (reason is logged)</div>
+       <div class="seg" role="group" aria-label="New status" style="justify-self:start">${['NORMAL','UNDER_REVIEW','QUARANTINED'].map(s=>`<button class="${S.ovStatus===s?'on':''}" data-act="ovs" data-v="${s}">${s==='NORMAL'?'Release':s==='UNDER_REVIEW'?'Hold':'Quarantine'}</button>`).join('')}</div>
+       <input type="text" id="ovr" placeholder="Reason, e.g. seals intact, inspected on site" aria-label="Override reason"><button class="btn sm pri" style="justify-self:start" data-act="ovr-ok" data-v="${p.id}">Apply override</button></div>`;
+}
+function vMaintenance(){
+  const rec=[4.1,4.4,4.9,5.8,6.3,7.2],mx=8;
+  const long=(()=>{const r=seeded(120,11);return r.map((x,i)=>{const t=i/119;let v=3+Math.sin(i/5)*.5+(x-.5)*.6;if(i>28&&i<34)v+=3*Math.exp(-(i-28)/2);if(i>70&&i<78)v+=3.8*Math.exp(-(i-70)/3);if(i>100&&i<110)v+=4.6*Math.exp(-(i-100)/3.5);return Math.round(v*10)/10})})();
+  return `<div class="g g4"><div class="card kpi"><div class="l">Time in range, 6 h</div><div class="v tn">94.2%</div><div>${pill('ok','Within 90% target')}</div></div>
+    <div class="card kpi"><div class="l">Recovery after door opening</div><div class="v tn">5.8 min</div><div>${pill('warn','Up from 4.1 min',false)}</div></div>
+    <div class="card kpi"><div class="l">Baseline drift</div><div class="v tn">+0.4 °C/h</div><div>${pill('warn','Cooling weakening',false)}</div></div>
+    <div class="card kpi"><div class="l">Compressor cycle length</div><div class="v tn">11.5 min</div><div>${pill('ok','Stable')}</div></div></div>
+   <div class="g g2" style="margin-top:14px"><div class="card"><div class="h"><h3>Hold temperature, last 6 h</h3><span class="grow"></span><span class="chip">Green band = tightest limit 2–8 °C</span></div>
+       <div class="b">${lineChart(long,{w:760,h:230,max:12,labels:['-6 h','-4 h','-2 h','now']})}</div></div>
+     <div class="card"><div class="h"><h3>Recovery time per door opening</h3></div><div class="b">
+       <svg viewBox="0 0 320 190" width="100%" role="img" aria-label="Recovery time rising across six door openings">
+        ${rec.map((v,i)=>{const h=v/mx*130,x=22+i*50;return `<rect x="${x}" y="${160-h}" width="32" height="${h}" rx="6" fill="${v>6?'var(--warn)':'var(--info)'}"/><text x="${x+16}" y="${152-h}" text-anchor="middle" font-size="11" fill="var(--fg)" class="tn">${v}</text><text x="${x+16}" y="178" text-anchor="middle" font-size="10.5" fill="var(--dim)">#${i+1}</text>`}).join('')}
+        <line x1="14" x2="310" y1="160" y2="160" stroke="var(--line2)"/><text x="14" y="14" font-size="10.5" fill="var(--dim)">minutes to return to range</text></svg>
+       <div class="note">Rising recovery time is the early sign of a weakening refrigeration unit.</div></div></div></div>
+   <div class="g g2" style="margin-top:14px"><div class="card"><div class="h"><h3>Early-warning indicators</h3></div><div class="b list">
+      <div class="row"><span><b>Recovery time up 76% over 6 openings</b><br><span class="mut">Service the refrigeration unit before the next long haul</span></span>${pill('warn','Maintenance soon')}</div>
+      <div class="row"><span><b>Baseline 0.4 °C/h warmer than 7 days ago</b><br><span class="mut">Check door seal and evaporator coil</span></span>${pill('warn','Watch')}</div>
+      <div class="row"><span><b>No unexplained light events this trip</b></span>${pill('ok','Clear')}</div></div></div>
+     <div class="card"><div class="h"><h3>Projection</h3></div><div class="b"><div class="v" style="font-size:26px;font-weight:600">≈ 38 min</div><div class="mut">until the hold reaches 8 °C if cooling stopped now</div>
+       <div class="note" style="margin-top:8px">Linear estimate from the current slope. An early-warning indicator, not a trained prediction.</div></div></div></div>`;
+}
+function vRoute(){
+  return `<div class="g g2"><div class="card"><div class="h"><h3>Route and geofences</h3><span class="grow"></span><span class="chip">Progress <b class="tn">${Math.round(sc().prog*100)}%</b></span></div>
+     <div class="b"><div class="map">${mapSVG()}${overlay()}</div></div></div>
+   <div class="g" style="align-content:start"><div class="card"><div class="h"><h3>Stops</h3></div><div class="b"><div class="tl">
+       <div class="ok"><b>Dallas Depot</b> ${pill('ok','Departed',false)}<br><span class="mut">Loaded 07:42 · camera recording started</span></div>
+       <div class="${sc().zone.includes('high-risk')?'crit':'warn'}"><b>I-30 high-risk stretch</b> ${pill('warn','Monitored',false)}<br><span class="mut">Door opening here is never expected</span></div>
+       <div><b>Little Rock Dock 2</b> ${pill('info','Authorised stop',false)}<br><span class="mut">ETA 11:20 · 3 packages</span></div>
+       <div><b>Memphis Dock 4</b> ${pill('info','Authorised stop',false)}<br><span class="mut">ETA 13:05 · 5 packages</span></div></div></div></div>
+     <div class="card"><div class="h"><h3>Why geofences matter</h3></div><div class="b mut">The same light spike is routine at an authorised dock and an emergency on the highway. The agent reads the zone before it decides.</div></div></div></div>`;
+}
+function vIncidents(){
+  const c=sc(),cur=c.incident,list=[];
+  if(cur)list.push({id:'INC-0413',t:c.name,sev:c.stat({id:''})==='QUARANTINED'?'crit':'warn',when:'Just now',live:true});
+  list.push({id:'INC-0412',t:'Door ajar, resolved',sev:'ok',when:'Oct 12, 14:08'},{id:'INC-0409',t:'Sensor offline 11 min',sev:'info',when:'Oct 9, 09:31'});
+  const i=Math.min(S.incSel,list.length-1),inc=list[i],live=inc.live;
+  return `<div class="g g2" style="grid-template-columns:minmax(0,1fr) minmax(0,2fr)"><div class="card" style="align-self:start"><div class="h"><h3>Incidents</h3></div><div class="b list">
+    ${list.map((x,k)=>`<button class="row" style="text-align:left;${k===i?'border-color:var(--accent)':''}" data-act="inc" data-v="${k}"><span><b class="mono">${x.id}</b><br><span class="mut">${esc(x.t)}</span></span><span style="text-align:right">${pill(x.sev,x.when,false)}</span></button>`).join('')}
+    ${cur?'':'<div class="note">No open incident in this scenario. Pick Door ajar, Theft or Compressor failure.</div>'}</div></div>
+   <div class="g"><div class="card"><div class="h"><h3>Evidence pack ${inc.id}</h3><span class="grow"></span>${pill('warn','Draft: needs human review')}</div><div class="b">
+     <div class="g g3" style="gap:10px">${['door','theft','door'].map((k,n)=>{const kind=live?(c.frame==='idle'?'idle':(n===1?c.frame:'door')):'door';return `<div><div class="cam">${frameSVG(live?kind:'door','15:49:'+(40+n*6),10+n)}</div><div class="note mono" style="margin-top:4px">${['t-12 s','t0','t+9 s'][n]} · sha ${['4be1a9','90cf22','7d03be'][n]}…</div></div>`}).join('')}</div>
+     <div class="tl" style="margin-top:16px">
+       <div class="warn"><span class="mono mut">15:49:40</span> Light rises from 2% to 71% while moving at 58 mph</div>
+       <div class="crit"><span class="mono mut">15:49:42</span> Event ping fired; rules flag LIGHT_BRIGHT outside authorised zone</div>
+       <div><span class="mono mut">15:49:43</span> Camera pre-event buffer saved (30 s) and hashed</div>
+       <div class="ok"><span class="mono mut">15:49:44</span> Driver and admin alerted by voice and Telegram (1.8 s)</div>
+       <div><span class="mono mut">15:49:47</span> Claude explanation attached; statuses unchanged by the model</div></div></div></div>
+    <div class="card"><div class="h"><h3>Police report</h3><span class="grow"></span><span class="note">Prepared by the agent; you review and submit</span></div><div class="b">
+      <div class="paper"><div class="stamp">DRAFT</div><h4>Incident report ${inc.id}</h4><div style="color:#6b6a60;margin-bottom:6px">Vehicle TX-9913-HX · driver Marcus Lee (DRV-20418) · Dallas, TX to Memphis, TN</div>
+       <table><tr><td>Date / time</td><td>${new Date().toDateString()}, 15:49 local</td></tr><tr><td>Location</td><td>I-30 eastbound, mile 112 (no authorised stop)</td></tr>
+       <tr><td>Summary</td><td>${esc(live?c.block.reason:'Historical incident; see attached pack.')}</td></tr>
+       <tr><td>Goods affected</td><td>10 packages, 28,700 lbs (temperature-controlled)</td></tr>
+       <tr><td>Evidence</td><td class="mono" style="font-size:12px">3 frames, 1 clip · SHA-256 4be1a9…, 90cf22…, 7d03be…</td></tr>
+       <tr><td>Sensor record</td><td>Temperature 3 to 4 °C; light 2% to 74%; 41 readings</td></tr></table></div>
+      <div class="row" style="margin-top:12px"><label style="display:flex;gap:9px;align-items:center"><input type="checkbox" id="rev" ${S.reviewed?'checked':''} data-act="rev"> I have reviewed the evidence and the summary</label>
+        <button class="btn pri" data-act="approve" ${S.reviewed&&!S.approved?'':'disabled'}>${S.approved?'Approved':'Approve for filing'}</button></div>
+      ${S.approved?`<div class="warnbox" style="margin-top:10px">Approved by Lisa Nguyen at ${clock()}. Submit the report to the police yourself; ColdTrust does not file on your behalf.</div>`:''}</div></div></div></div>`;
+}
+
+/* ============================== chrome ============================== */
+const TABS=[['overview','Overview'],['cargo','Cargo'],['maintenance','Maintenance'],['route','Route'],['incidents','Incidents']];
+function renderChrome(){
+  const c=counts(),s=sc(),w=worst();
+  $('#kpis').innerHTML=`<span class="chip">Hold <b class="tn">${s.temp} °C</b></span><span class="chip">Light <b class="tn">${s.light}%</b></span><span class="chip">Cleared <b class="tn">${c.NORMAL}/10</b></span><span class="chip">Link <b>${S.scen==='replay'?'Rejected payload':'Online · ping 0:42 ago'}</b></span>`;
+  $('#vstat').innerHTML=pill(TONE[w],w==='NORMAL'?'Normal':w==='UNDER_REVIEW'?'Under review':'Quarantined - do not accept');
+  const al=activeAlerts();
+  $('#ticker').innerHTML=al.length?al.concat(al).map(a=>`<span class="a">${pill(a.sev==='crit'?'crit':'warn',a.sev==='crit'?'CRITICAL':'WARNING',false)}<b>${esc(a.title)}</b><span class="mut">${esc(a.text)}</span><button class="btn sm" data-act="ack" data-v="${a.id}">Acknowledge</button></span>`).join(''):`<span class="mut">No active alerts. Hold at ${s.temp} °C, light ${s.light}%.</span>`;
+  const n=al.length;const b=$('#bellN');b.hidden=!n;b.textContent=n;
+  $('#tabs').innerHTML=TABS.map(([k,t])=>`<button role="tab" aria-selected="${S.tab===k}" class="${S.tab===k?'on':''}" data-act="tab" data-v="${k}">${t}${k==='cargo'&&c.QUARANTINED?`<span class="c">${c.QUARANTINED}</span>`:k==='incidents'&&s.incident?'<span class="c">1</span>':''}</button>`).join('');
+  $$('.rail button[data-v]').forEach(b=>{if(b.dataset.act==='tab')b.classList.toggle('on',b.dataset.v===S.tab)});
+  $('#dockBtns').innerHTML=Object.entries(SC).map(([k,v])=>`<button class="s ${S.scen===k?'on':''}" data-act="scen" data-v="${k}">${v.name}</button>`).join('');
+  $$('.seg [data-act=module]').forEach(b=>b.classList.toggle('on',b.dataset.v===S.module));
+  const vb=$('#voiceBtn');vb.textContent=S.voice?'On':'Off';vb.setAttribute('aria-pressed',S.voice);vb.classList.toggle('on',S.voice);
+  $('#pop-bell').innerHTML=`<div class="mut" style="padding:6px 10px;font-size:12px">Notifications</div>`+(S.log.filter(l=>l.sev!=='info').slice(-5).reverse().map(l=>`<div class="it"><span><b style="font-weight:600">${esc(l.type==='HUMAN'?'Supervisor action':l.find?l.find.split('(')[0]:'Event')}</b><br><span class="mut" style="font-size:12px">${esc(l.reason.slice(0,92))}…</span></span><span class="mono dim">${l.ts}</span></div>`).join('')||'<div class="it mut">Nothing yet.</div>');
+  $('#pop-profile').innerHTML=`<div class="it" style="display:block"><b>Lisa Nguyen</b><div class="mut">Fleet manager · lisa@coldtrust.example</div></div>
+    <div class="it" style="display:block"><div class="mut" style="font-size:12px;margin-bottom:6px">Monitoring settings (read-only demo)</div><div class="mono" style="font-size:12px;line-height:1.8">log interval 30 s<br>routine ping 15 min · event ping instant<br>rate limit 0.5 °C/min · step 5 °C/min<br>light alarm ≥ 30% · hold limits 2–8 °C</div></div>
+    <button class="it" data-act="theme"><span>Switch theme</span><span class="mut">Dark / Light</span></button>
+    <button class="it" data-act="voice"><span>Voice alerts</span><span class="mut">${S.voice?'On':'Off'}</span></button>
+    <button class="it" data-act="toast-info" data-v="Signed out (demo)"><span>Sign out</span></button>`;
+  ['bell','profile'].forEach(k=>$('#pop-'+k).hidden=S.menu!==k);
+}
+function renderView(){
+  const v={overview:vOverview,cargo:vCargo,maintenance:vMaintenance,route:vRoute,incidents:vIncidents}[S.tab]();
+  $('#view').innerHTML=v;
+  placeTruck();
+  const t=$('#term');if(t)t.scrollTop=t.scrollHeight;
+}
+function render(){renderChrome();renderView()}
+
+function toast(sev,title,text){
+  const el=document.createElement('div');el.className='t '+sev;el.innerHTML=`<b>${esc(title)}</b><div class="mut">${esc(text)}</div>`;
+  $('#toast').appendChild(el);setTimeout(()=>el.remove(),6500);
+}
+function speak(t){if(!S.voice||!t)return;try{speechSynthesis.cancel();speechSynthesis.speak(new SpeechSynthesisUtterance(t))}catch(e){}}
+function setScenario(k){
+  S.scen=k;S.ov={};S.acked={};S.reassign=false;
+  const c=sc();
+  if(c.block){S.log.push({ts:clock(),type:c.block.type,sev:c.block.sev,params:c.block.params,find:c.block.find,reason:c.block.reason,action:c.block.action});}
+  else S.log.push({ts:clock(),type:'ROUTINE',sev:'info',params:`temp=${c.temp}C hum=${c.hum}% light=${c.light}% seq=${2040+S.log.length} n=12`,reason:'All readings within limits.'});
+  render();
+  if(c.alerts.length){toast(c.alerts[0].sev==='crit'?'crit':'warn',c.alerts[0].title,c.alerts[0].text+(c.channels?` · voice ${c.channels.voice.toFixed(1)} s, Telegram ${c.channels.tg.toFixed(1)} s`:''));speak(c.voice)}
+}
+
+/* ============================== events ============================== */
+document.addEventListener('click',e=>{
+  const el=e.target.closest('[data-act]');
+  if(!e.target.closest('.relw')&&S.menu){S.menu=null;renderChrome()}
+  if(!el)return;
+  const a=el.dataset.act,v=el.dataset.v;
+  if(a==='tab'){S.tab=v;S.menu=null;render()}
+  else if(a==='scen')setScenario(v);
+  else if(a==='pick'){S.sel=(S.sel===v&&S.tab==='cargo'&&el.classList.contains('slot')===false)?null:v;S.reassign=false;if(S.tab!=='cargo')S.tab='cargo';render()}
+  else if(a==='filter'){S.filter=v;render()}
+  else if(a==='module'){S.module=v;render()}
+  else if(a==='mt'){S[v]=!S[v];renderView()}
+  else if(a==='alog'){S.alogOpen=!S.alogOpen;renderView()}
+  else if(a==='ack'){S.acked[S.scen+v]=1;S.log.push({ts:clock(),type:'HUMAN',sev:'info',params:`alert ${v} acknowledged by Lisa Nguyen`,reason:'Acknowledgement recorded; escalation timer cancelled.'});render()}
+  else if(a==='voice'){S.voice=!S.voice;if(S.voice)speak('Voice alerts enabled.');render()}
+  else if(a==='menu'){S.menu=(v==='settings')?'profile':(S.menu===v?null:v);renderChrome()}
+  else if(a==='theme'){const r=document.documentElement;const dark=getComputedStyle(r).colorScheme.includes('dark')&&r.dataset.theme!=='light';r.dataset.theme=dark?'light':'dark';S.menu=null;render()}
+  else if(a==='toast-info')toast('info','Demo action',v);
+  else if(a==='reassign'){S.reassign=!S.reassign;renderView()}
+  else if(a==='reassign-ok'){const t=$('#rtruck').value.split(' ')[0];S.reassign=false;S.log.push({ts:clock(),type:'HUMAN',sev:'info',params:`${v} reassigned to ${t}`,reason:'Capacity and temperature limits of the target truck were re-checked.'});toast('ok','Reassigned',`${v} moved to ${t}`);render()}
+  else if(a==='ovs'){S.ovStatus=v;renderView()}
+  else if(a==='ovr-ok'){
+    const why=($('#ovr').value||'').trim();
+    if(why.length<3){toast('warn','Reason required','Enter at least 3 characters so the override can be audited.');$('#ovr').focus();return}
+    S.ov[v]=S.ovStatus;S.log.push({ts:clock(),type:'HUMAN',sev:'warn',params:`${v} -> ${S.ovStatus} by Lisa Nguyen`,reason:'Supervisor override: '+why,action:S.ovStatus==='NORMAL'?`${v}: custody token re-issued; old token stays revoked`:`${v}: status set manually`});
+    toast('info','Override logged',`${v} is now ${LABEL[S.ovStatus]}`);render()}
+  else if(a==='inc'){S.incSel=+v;render()}
+  else if(a==='approve'){S.approved=true;render()}
+});
+document.addEventListener('change',e=>{if(e.target.id==='rev'){S.reviewed=e.target.checked;S.approved=false;renderView()}});
+const q=$('#q'),qres=$('#qres');
+q.addEventListener('input',()=>{
+  QTEXT=q.value.trim().toLowerCase();
+  if(!QTEXT){qres.hidden=true;if(S.tab==='cargo')renderView();return}
+  const r=PK.filter(matches).slice(0,5);
+  qres.innerHTML=r.length?r.map(p=>`<button class="it" data-act="pick" data-v="${p.id}"><span><b class="mono">${p.id}</b> ${esc(p.d)}<br><span class="mut" style="font-size:12px">${esc(p.client)} · ${esc(p.dest)}</span></span>${pill(TONE[status(p)],LABEL[status(p)].split(' - ')[0],false)}</button>`).join(''):'<div class="it mut">No match.</div>';
+  qres.hidden=false;
+});
+document.addEventListener('keydown',e=>{if((e.ctrlKey||e.metaKey)&&e.key.toLowerCase()==='k'){e.preventDefault();q.focus()}if(e.key==='Escape'){qres.hidden=true;S.menu=null;renderChrome()}});
+document.addEventListener('click',e=>{if(!e.target.closest('.search'))qres.hidden=true});
+render();
+</script>

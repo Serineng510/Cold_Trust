@@ -1,0 +1,9 @@
+fastapi>=0.110
+uvicorn[standard]>=0.29
+pydantic>=2.6
+anthropic>=1.0
+httpx>=0.27
+pytest>=8.0
+jsonschema>=4.0  # tests: validate EPCIS output against GS1's schema
+opencv-contrib-python>=4.8,<5  # camera/ (C270 capture; 5.x dropped the HOG fallback detector)
+mediapipe>=1.0  # camera/ (pose + hand landmarks for person detection)

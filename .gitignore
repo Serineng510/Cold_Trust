@@ -1,0 +1,20 @@
+# Secrets: never commit
+.env
+.env.*
+!.env.example
+firmware/**/secrets.h
+
+# Local data, evidence pictures, models, caches
+data/
+camera/models/
+camera/*.jpg
+sim/.clock
+tests/.cache/
+*.db
+
+# Python / tools
+.venv/
+__pycache__/
+.pytest_cache/
+*.log
+.claude/
