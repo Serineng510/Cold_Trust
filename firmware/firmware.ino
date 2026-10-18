@@ -32,6 +32,8 @@
 
 // ------------------------------------------------------------------ settings you may change
 const bool DEMO_MODE = true;            // true: routine ping every 60 s (for the demo); false: every 15 min
+const bool ALLOW_MOCK = true;           // follow the dashboard's "Mock temperature" / "Mock light" checkboxes (backend needs --demo).
+                                        // Unticked = the real sensor; ticked = the slider value, labelled as mock.
 const bool LIGHT_INVERT = false;        // set as found in test 2 (true if the raw value DROPS with more light)
 const bool DO_BRIGHT_IS_LOW = true;     // most LM393 light modules pull DO LOW when it is bright
 const float HOLD_MIN_C = 2.0;           // tightest product limits in the hold
@@ -57,7 +59,7 @@ const unsigned long WIFI_RETRY_MS = 10000;
 const int MAX_PER_PAYLOAD = 40;
 
 // ------------------------------------------------------------------ state
-struct LogEntry { uint32_t t; float temp; uint8_t hum; uint16_t light; };
+struct LogEntry { uint32_t t; float temp; uint8_t hum; uint16_t light; bool mockTemp; bool mockLight; };
 const int BUF_SIZE = 120;                      // 120 x 30 s = 1 hour without Wi-Fi
 LogEntry buf[BUF_SIZE];
 int bufHead = 0, bufCount = 0;
@@ -72,6 +74,12 @@ int brightPolls = 0;
 uint16_t lightNow = 0;
 volatile bool doChanged = false;
 
+bool mockOn = false, tempMocked = false;        // dashboard checkbox, and whether the latest reading was mocked
+float mockTemp = 4.0;                           // the dashboard slider
+bool mockLightOn = false, lightMocked = false;  // same for the light sensor
+float mockLightPct = 0.0;
+unsigned long nextMockPoll = 0, lastMockPoll = 0;
+const unsigned long MOCK_POLL_MS = 2000;       // how often the dashboard's checkbox / slider is checked
 bool lightAlarm = false, tempAlarm = false;
 unsigned long lightAlarmSent = 0, tempAlarmSent = 0, stepSent = 0;
 unsigned long lastSample = 0, lastLog = 0, lastRoutine = 0, lastLightPoll = 0, lastWifiTry = 0;
@@ -128,7 +136,7 @@ void logSample() {
     bufCount--;
     Serial.println("Buffer full: oldest reading dropped");
   }
-  buf[idx] = LogEntry{ t, tempNow, (uint8_t)lround(humNow), lightNow };
+  buf[idx] = LogEntry{ t, tempNow, (uint8_t)lround(humNow), lightNow, tempMocked, lightMocked };
   bufCount++;
 }
 
@@ -153,6 +161,7 @@ bool postChunk(const char *pingType, const char *trigger) {
   if (trigger) doc["trigger"] = trigger; else doc["trigger"] = nullptr;
   JsonArray arr = doc["samples"].to<JsonArray>();
   int n = 0;
+  bool anyMockTemp = false, anyMockLight = false;
   uint32_t newestT = lastSentT;
   for (int i = 0; i < bufCount && n < MAX_PER_PAYLOAD; i++) {
     const LogEntry &e = buf[(bufHead + i) % BUF_SIZE];
@@ -166,9 +175,17 @@ bool postChunk(const char *pingType, const char *trigger) {
     s["hum"] = e.hum;
     s["light"] = e.light;
     newestT = e.t;
+    if (e.mockTemp) anyMockTemp = true;
+    if (e.mockLight) anyMockLight = true;
     n++;
   }
   if (n == 0) return true;
+  if (anyMockTemp || anyMockLight) {             // labels only (not signed): the dashboard shows which sensor was mocked
+    doc["demo"] = true;
+    JsonArray what = doc["demo_sensors"].to<JsonArray>();
+    if (anyMockTemp) what.add("temp");
+    if (anyMockLight) what.add("light");
+  }
   doc["sig"] = hmacSha256Hex(DEVICE_SECRET, text);
   String body;
   serializeJson(doc, body);
@@ -239,10 +256,22 @@ void updateAlarmOutputs() {
 }
 
 // ------------------------------------------------------------------ sensing
+// Light value for this moment: the dashboard's slider (with the tiny jitter a real LDR has, so it never looks
+// like a frozen sensor) when "Mock light" is ticked, otherwise the real sensor.
+void refreshLightValue() {
+  if (ALLOW_MOCK && mockLightOn) {
+    lightMocked = true;
+    lightNow = constrain((int)(mockLightPct * 10.23f) + (int)random(-3, 4), 0, 1023);
+  } else {
+    lightMocked = false;
+    lightNow = readLight();
+  }
+}
+
 void pollLight() {
-  if (okLedOffAt) return;                        // never read the light while our own LED is lit
-  lightNow = readLight();
-  bool bright = lightPct(lightNow) >= LIGHT_ALARM_PCT || (doChanged && doSaysBright());
+  if (!(ALLOW_MOCK && mockLightOn) && okLedOffAt) return;   // never read the real light while our own LED is lit
+  refreshLightValue();
+  bool bright = lightPct(lightNow) >= LIGHT_ALARM_PCT || (!lightMocked && doChanged && doSaysBright());
   doChanged = false;
   brightPolls = bright ? brightPolls + 1 : 0;
   bool open = brightPolls >= 2;                  // 2 polls in a row = 0.2 s of light
@@ -259,12 +288,49 @@ void pollLight() {
   }
 }
 
+// Asks the backend whether the dashboard's "Mock temperature" box is ticked, and the slider value.
+// Returns true when the setting CHANGED (box ticked / unticked, or the slider moved).
+// After a failed request it backs off for 30 s so a missing server never slows the sensors.
+bool pollMock() {
+  if (!ALLOW_MOCK || WiFi.status() != WL_CONNECTED || millis() < nextMockPoll) return false;
+  bool wasOn = mockOn, wasLightOn = mockLightOn;
+  float wasTemp = roundf(mockTemp), wasLight = roundf(mockLightPct);
+  WiFiClient client;
+  HTTPClient http;
+  http.setTimeout(1500);
+  http.begin(client, String(SERVER_URL) + "/api/demo");
+  int code = http.GET();
+  if (code == 200) {
+    JsonDocument d;
+    if (!deserializeJson(d, http.getString())) {
+      bool enabled = d["enabled"].as<bool>();
+      mockOn = enabled && d["mock"].as<bool>();
+      mockTemp = d["temp_c"].as<float>();
+      mockLightOn = enabled && d["light_mock"].as<bool>();
+      mockLightPct = d["light_pct"].as<float>();
+    }
+  } else {
+    nextMockPoll = millis() + 30000;
+  }
+  http.end();
+  return mockOn != wasOn || (mockOn && roundf(mockTemp) != wasTemp) ||
+         mockLightOn != wasLightOn || (mockLightOn && roundf(mockLightPct) != wasLight);
+}
+
 void sampleTemperature() {
-  float t = dht.readTemperature();
-  float h = dht.readHumidity();
-  if (isnan(t) || isnan(h)) {
-    Serial.println("DHT11 read failed (check DATA wire on D2)");
-    return;
+  float t, h;
+  if (ALLOW_MOCK && mockOn) {                    // box ticked: report the slider value
+    t = roundf(mockTemp);
+    h = 55 + random(-2, 3);
+    tempMocked = true;
+  } else {                                       // box unticked: the real sensor
+    t = dht.readTemperature();
+    h = dht.readHumidity();
+    tempMocked = false;
+    if (isnan(t) || isnan(h)) {
+      Serial.println("DHT11 read failed (check DATA wire on D2)");
+      return;
+    }
   }
   tempNow = t;
   humNow = h;
@@ -299,12 +365,13 @@ void sampleTemperature() {
 
 void printStatus() {
   Serial.print("Temperature: ");
-  if (isnan(tempNow)) Serial.println("no reading"); else { Serial.print(tempNow, 1); Serial.println(" C"); }
+  if (isnan(tempNow)) Serial.println("no reading");
+  else { Serial.print(tempNow, 1); Serial.println(tempMocked ? " C (MOCK from the dashboard)" : " C"); }
   Serial.print("Humidity: ");
   if (isnan(humNow)) Serial.println("no reading"); else { Serial.print(humNow, 0); Serial.println(" %"); }
   Serial.print("Light: ");
   Serial.print(lightPct(lightNow), 1);
-  Serial.println(" %");
+  Serial.println(lightMocked ? " % (MOCK from the dashboard)" : " %");
   Serial.print("Door alarm: ");
   Serial.println(lightAlarm ? "YES" : "no");
   Serial.print("Temperature alarm: ");
@@ -373,6 +440,9 @@ void selfTest() {
   if (!isnan(t) && !isnan(h)) dhtDetail = String(t, 1) + " C, " + String(h, 0) + " %";
   result(!isnan(t) && !isnan(h), "DHT11", dhtDetail,
          "DATA -> D2, VCC -> 3V3, GND -> GND (3-pin module; a bare sensor also needs 10k DATA-3V3)");
+  if (ALLOW_MOCK) {
+    Serial.println("[INFO]  The dashboard can mock the temperature and the light (Hold / Light chips). Mock readings are labelled.");
+  }
 
   // 2. light sensor, analog
   int lo = 1023, hi = 0;
@@ -461,6 +531,7 @@ void setup() {
   Serial.print("ColdTrust node ");
   Serial.println(DEVICE_ID);
   Serial.println(DEMO_MODE ? "Demo mode: routine ping every 60 s" : "Routine ping every 15 min");
+  randomSeed(micros());
   selfTest();
   lastRoutine = lastLog = lastSample = millis();
 }
@@ -472,6 +543,21 @@ void loop() {
     if (c == 't' || c == 'T') selfTest();
   }
   keepWifi();
+  if (ALLOW_MOCK && now - lastMockPoll >= MOCK_POLL_MS) {
+    lastMockPoll = now;
+    if (pollMock()) {                            // setting changed: show it on the dashboard right away
+      Serial.print("Mock setting changed: temperature ");
+      Serial.print(mockOn ? "MOCK" : "real");
+      Serial.print(", light ");
+      Serial.println(mockLightOn ? "MOCK" : "real");
+      sendPending("ROUTINE", nullptr);           // first deliver readings taken under the old setting
+      refreshLightValue();                       // and take new readings under the new setting
+      sampleTemperature();
+      logSample();
+      sendPending("ROUTINE", nullptr);
+      lastSample = lastRoutine = millis();
+    }
+  }
   if (now - lastLightPoll >= LIGHT_POLL_MS) { lastLightPoll = now; pollLight(); }
   if (now - lastSample >= SAMPLE_MS) { lastSample = now; sampleTemperature(); }
   if (now - lastLog >= LOG_MS) { lastLog = now; logSample(); printStatus(); }

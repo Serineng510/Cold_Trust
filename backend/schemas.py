@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from typing import Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
 
 class SampleIn(BaseModel):
@@ -22,6 +22,9 @@ class IngestIn(BaseModel):
     trigger: str | None = Field(default=None, max_length=24)
     samples: list[SampleIn] = Field(min_length=1, max_length=500)
     sig: str = Field(min_length=64, max_length=64)
+    demo: bool = Field(default=False, description="Node is sending mock readings (display label only)")
+    demo_sensors: list[Literal["temp", "light"]] = Field(
+        default_factory=list, max_length=2, description="Which sensors were mocked; empty with demo=true means temp")
 
 
 class VehicleIn(BaseModel):
@@ -55,6 +58,21 @@ class ReassignIn(BaseModel):
     truck: str = Field(min_length=3, max_length=40)
     reason: str = Field(min_length=3, max_length=300)
     by: str = Field(default="admin", min_length=1, max_length=60)
+
+
+class DemoMockIn(BaseModel):
+    mock: bool | None = Field(default=None, description="Temperature: true = the node reports temp_c instead of its sensor")
+    temp_c: float | None = Field(default=None, ge=-20, le=60, description="Mock temperature (C); keeps the last value if omitted")
+    light_mock: bool | None = Field(default=None, description="Light: true = the node reports light_pct instead of its sensor")
+    light_pct: float | None = Field(default=None, ge=0, le=100, description="Mock light level (%); keeps the last value if omitted")
+    log: bool = Field(default=True, description="Write an audit entry (slider drags send log=false until released)")
+    by: str = Field(default="admin", min_length=1, max_length=60)
+
+    @model_validator(mode="after")
+    def _something_to_change(self):
+        if self.mock is None and self.light_mock is None:
+            raise ValueError("send mock (temperature) and/or light_mock")
+        return self
 
 
 class VehicleActionIn(BaseModel):

@@ -211,6 +211,7 @@ Updates arrive live over a WebSocket; the page refreshes every 10 s if the conne
 | 18 Oct | **Evidence** is now a simple list (time, location, picture); report form removed |
 | 18 Oct | **Vehicle speed card** and the **stopped-on-route theft rule**; Activate Route marks departure |
 | 18 Oct | **Buzzer removed** from hardware, firmware, diagram and guides; **dashboard siren + voice** on every alert, Telegram in real time |
+| 18 Oct | **Mock temperature** (the demo board's DHT11 cannot show room temperature): Hold chip → checkbox + slider; unticked uses the sensor; always labelled as mock |
 
 ---
 
@@ -235,6 +236,22 @@ hotspot); check `ipconfig`. The board can only reach it if Windows allows Python
 firewall "Allow an app").
 
 ---
+
+## 8b. Mock temperature and light (demo aid)
+
+The demo board's DHT11 only reads 1–2 °C, and you may want to trigger the door rules without a torch. The dashboard can
+therefore **mock the temperature and the light**, and it is never hidden:
+
+- Start the backend with **`--demo`** (off by default).
+- Click the **Hold** chip (temperature) or the **Light** chip in the top bar. Each opens a **Mock ...** checkbox:
+  - **Unticked:** the node reports its real sensor.
+  - **Ticked:** a slider appears (temperature 0–40 °C, light 0–100 %) and the node reports the slider value within about 2 s.
+- The node polls `/api/demo` every 2 s (`ALLOW_MOCK = true` in `firmware.ino`) and sends immediately when a setting changes.
+  Mocked light carries a tiny jitter so it never looks like a frozen sensor.
+- Mock readings are flagged `demo` + `demo_sensors`: a banner says which sensor is mocked (and when it is waiting for the
+  node), a **mock** tag appears on that chip, the log shows `MOCK_TEMP` / `MOCK_LIGHT`, EPCIS carries `ct:simulated`.
+- Mocked light drives the real rules: e.g. 70 % light while stopped on an active route = THEFT SUSPECTED.
+- Set `ALLOW_MOCK = false` and run without `--demo` for strictly real measurements.
 
 ## 9. Status and known limits
 

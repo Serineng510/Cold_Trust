@@ -26,8 +26,8 @@ from .config import DEFAULT_SECRET, load
 from .engine import Engine, STATUS_LABEL
 from .llm import Explainer
 from .notify import Notifier
-from .schemas import (ActorIn, CameraObservationIn, EvidenceIn, IngestIn, OverrideIn, ReassignIn, VehicleActionIn,
-                      VehicleIn)
+from .schemas import (ActorIn, CameraObservationIn, DemoMockIn, EvidenceIn, IngestIn, OverrideIn, ReassignIn,
+                      VehicleActionIn, VehicleIn)
 from .seed import GEOFENCES, ROUTE, VEHICLE, seed
 from .store import Store
 
@@ -90,7 +90,11 @@ async def _deliver(entry: dict[str, Any]) -> None:
     Person and door alerts carry the latest annotated camera frame when the camera is live."""
     prefix = {"reminder": "REMINDER, still unresolved. ", "escalated": "ESCALATED. ",
               "status_change": "STATUS CHANGE. "}.get(entry.get("notify_reason") or "", "")
-    text = f"{prefix}[{entry['severity'].upper()}] {entry['kind']}: {entry['reasoning']}"
+    # Alerts raised while the node is sending mock readings must say so, or a demo reads like a real incident.
+    demo = engine.demo_state()
+    mocked = [name for key, name in (("simulated_temp", "temperature"), ("simulated_light", "light")) if demo[key]]
+    tag = f"[MOCK DATA: {' + '.join(mocked)}] " if mocked else ""
+    text = f"{tag}{prefix}[{entry['severity'].upper()}] {entry['kind']}: {entry['reasoning']}"
     if entry.get("actions"):
         text += "\n" + "\n".join(entry["actions"][:4]) + (" ..." if len(entry["actions"]) > 4 else "")
     frame = _frame.get("jpeg") if time.time() - _frame.get("ts", 0) <= 15 else None
@@ -429,6 +433,38 @@ async def epcis_verify() -> dict[str, Any]:
     results = epcis.verify_events(store.list_epcis())
     bad = [r["eventID"] for r in results if not r["valid"]]
     return {"events": len(results), "all_valid": not bad, "invalid": bad}
+
+
+# ------------------------------------------------------------------ demo: mock temperature
+
+@app.get("/api/demo")
+async def demo_get() -> dict[str, Any]:
+    """The node polls this: if `mock` is true it reports `temp_c` instead of reading its sensor."""
+    return engine.demo_state()
+
+
+@app.post("/api/demo")
+async def demo_set(body: DemoMockIn) -> dict[str, Any]:
+    if not cfg.demo_enabled:
+        raise HTTPException(403, "mock temperature is off; start the backend with --demo")
+    before = engine.demo_state()
+    state = engine.set_demo_mock(body.mock, body.temp_c, body.light_mock, body.light_pct)
+    if body.log:
+        bits = []
+        if body.mock is not None:
+            bits.append(f"set the MOCK temperature to {state['temp_c']:.0f} °C" if body.mock and before["mock"] else
+                        f"turned MOCK temperature on, set to {state['temp_c']:.0f} °C" if body.mock else
+                        "turned mock temperature off; the node reports its real sensor again")
+        if body.light_mock is not None:
+            bits.append(f"set the MOCK light to {state['light_pct']:.0f} %" if body.light_mock and before["light_mock"] else
+                        f"turned MOCK light on, set to {state['light_pct']:.0f} %" if body.light_mock else
+                        "turned mock light off; the node reports its real light sensor again")
+        entry = _human_entry("DEMO_MODE", body.by, f"{body.by} {' and '.join(bits)}. Mock readings are labelled as mock.",
+                             {"mock": body.mock, "temp_c": state["temp_c"], "light_mock": body.light_mock,
+                              "light_pct": state["light_pct"]}, [])
+        await broadcast({"type": "audit", "entry": entry})
+    await broadcast({"type": "demo", "demo": state})
+    return state
 
 
 @app.get("/api/config")

@@ -26,6 +26,8 @@ STATUS_LABEL = {
 }
 TAMPER_RISK_FLOOR = {"THEFT_SUSPECTED": 90, "SPOOF_SUSPECTED": 50, "SUSPICIOUS_PERSON": 40, "DOOR_AJAR": 35}
 PERSON_FRESH_S = 120  # a camera sighting older than this no longer counts
+DEMO_DEFAULTS = {"mock": False, "temp_c": 4.0, "light_mock": False, "light_pct": 0.0}
+DEMO_FRESH_S = 600
 HISTORY_WINDOW_S = 6 * 3600
 REMINDER_S = 600  # unresolved problems are re-sent at most every 10 min
 DATA_TRUST_CODES = {"LIGHT_ZERO_VARIANCE", "DOOR_OPEN_NO_THERMAL_RESPONSE", "SENSOR_DISAGREEMENT"}
@@ -202,7 +204,8 @@ class Engine:
                 "step_c": round(step, 1), "bright_s": round(bright_s),
                 "speed_mph": vehicle.get("speed_mph"), "zone": vehicle.get("zone"),
                 "lat": vehicle.get("lat"), "lon": vehicle.get("lon"), "route_status": vehicle.get("route_status"),
-                "person_in_frame": person_recent,
+                "person_in_frame": person_recent, "simulated": bool(p.demo),
+                "mocked": list((p.demo_sensors or ["temp"]) if p.demo else []),
             },
             "findings": [f.as_dict() for f in findings],
             "verdict": worst,
@@ -221,8 +224,11 @@ class Engine:
         entry["notify_reason"] = notify_reason
         entry["id"] = self.store.add_audit(now, entry)
         entry["ts"] = now
+        sensors = (p.demo_sensors or ["temp"]) if p.demo else []
+        self.store.kv_set("demo_last", {"ts": now, "demo": bool(p.demo), "sensors": sensors})   # was the newest message mock?
         self._record_trip_events(now=now, samples=samples, codes=codes, scenario=scenario,
-                                 transitions=transitions, packages=packages, audit_id=entry["id"])
+                                 transitions=transitions, packages=packages, audit_id=entry["id"],
+                                 simulated=bool(p.demo))
         return {"accepted": True, "entry": entry, "notify": notify, "scenario": scenario}
 
     # ================================================================ other inputs
@@ -439,7 +445,7 @@ class Engine:
 
     def _record_trip_events(self, *, now: float, samples: list[Sample], codes: set[str], scenario: str,
                             transitions: dict[tuple[str, bool], list[str]], packages: list[dict[str, Any]],
-                            audit_id: int) -> None:
+                            audit_id: int, simulated: bool = False) -> None:
         cfg = self.cfg
         epcs = [epcis.package_epc(pk["id"]) for pk in packages]
         truck = epcis.giai(VEHICLE["id"])
@@ -450,11 +456,40 @@ class Engine:
         self.store.add_epcis(epcis.transport_event(
             epcs, now, cfg.tz_offset, read_point=read_point, vehicle=truck, device=epcis.giai(VEHICLE["device_id"]),
             samples=samples, hold_limits=tuple(VEHICLE["hold_limits_c"]), light_alarm_pct=cfg.light_bright_pct,
-            data_suspect=bool(codes & DATA_TRUST_CODES), audit_id=audit_id))
+            data_suspect=bool(codes & DATA_TRUST_CODES), audit_id=audit_id, simulated=simulated))
         for (new_status, was_quarantined), ids in transitions.items():
             self.store.add_epcis(epcis.status_event(
                 [epcis.package_epc(i) for i in ids], now, cfg.tz_offset, new_status, read_point=read_point,
                 cause=scenario, vehicle=truck, was_quarantined=was_quarantined, audit_id=audit_id))
+
+    # ================================================================ demo (simulated temperature)
+    def demo_state(self) -> dict[str, Any]:
+        """Mock temperature the dashboard can switch on: checked = the node reports temp_c, unchecked = its sensor."""
+        cur = {**DEMO_DEFAULTS, **self.store.kv_get("demo_mock", {})}
+        last = self.store.kv_get("demo_last")
+        fresh = isinstance(last, dict) and self.now() - last["ts"] <= DEMO_FRESH_S
+        sensors = set(last.get("sensors", [])) if fresh and last.get("demo") else set()
+        on = self.cfg.demo_enabled
+        return {"enabled": on, "mock": bool(cur["mock"]) and on, "temp_c": cur["temp_c"],
+                "light_mock": bool(cur["light_mock"]) and on, "light_pct": cur["light_pct"],
+                # simulated_*: the newest message from the node contained mock readings of that sensor;
+                # it clears with the first message that does not
+                "simulated_temp": "temp" in sensors, "simulated_light": "light" in sensors,
+                "simulated": bool(sensors)}
+
+    def set_demo_mock(self, mock: bool | None = None, temp_c: float | None = None, light_mock: bool | None = None,
+                      light_pct: float | None = None) -> dict[str, Any]:
+        cur = {**DEMO_DEFAULTS, **self.store.kv_get("demo_mock", {})}
+        if mock is not None:
+            cur["mock"] = mock
+        if temp_c is not None:
+            cur["temp_c"] = round(temp_c)
+        if light_mock is not None:
+            cur["light_mock"] = light_mock
+        if light_pct is not None:
+            cur["light_pct"] = round(light_pct)
+        self.store.kv_set("demo_mock", cur)
+        return self.demo_state()
 
     # ================================================================ summaries
     def state(self) -> dict[str, Any]:
@@ -465,6 +500,7 @@ class Engine:
         return {
             "vehicle": self.store.kv_get("vehicle", {}),
             "camera": self.store.kv_get("camera", {}),
+            "demo": self.demo_state(),
             "packages": packages,
             "totals": {
                 "items": len(packages),
@@ -506,9 +542,9 @@ class Engine:
             return "THEFT_SUSPECTED"   # door opened while the truck stands still mid-route
         if spoof:
             return "SPOOF_SUSPECTED"
-        if light and authorised:
-            return "AUTHORISED_HANDLING"
-        if light:
+        if light and authorised and not thermal:
+            return "AUTHORISED_HANDLING"   # harmless only while nothing else is wrong; a temperature alarm still wins
+        if light and not authorised:
             return "DOOR_AJAR"
         if thermal:
             return "FREEZE_RISK" if cooling else "THERMAL_EXCURSION"

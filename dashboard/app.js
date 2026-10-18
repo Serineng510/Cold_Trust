@@ -14,7 +14,7 @@ const TONE = { NORMAL: 'ok', UNDER_REVIEW: 'warn', QUARANTINED: 'crit' };
 const PRIO = { Critical: 'crit', High: 'warn', Normal: 'info', Low: 'mut' };
 const SEV_TONE = { info: 'info', warning: 'warn', critical: 'crit', emergency: 'crit' };
 const ORDER = ['NORMAL', 'UNDER_REVIEW', 'QUARANTINED'];
-const HUMAN_KINDS = new Set(['ALERT_ACKNOWLEDGED', 'REPORT_APPROVED', 'REASSIGN_REQUESTED', 'VEHICLE_ACTION', 'SUPERVISOR_OVERRIDE']);
+const HUMAN_KINDS = new Set(['ALERT_ACKNOWLEDGED', 'REPORT_APPROVED', 'REASSIGN_REQUESTED', 'VEHICLE_ACTION', 'SUPERVISOR_OVERRIDE', 'DEMO_MODE']);
 const TRUCKS = ['TX-2210-HX (idle, 61% full)', 'TX-7745-HX (loading, 30% full)'];
 const pill = (tone, text, dot = true) => `<span class="pill t-${tone}">${dot ? '<i></i>' : ''}${esc(text)}</span>`;
 const store = {
@@ -137,6 +137,7 @@ function connect() {
       refreshState(); refreshReadings();
       render();
     } else if (m.type === 'vehicle' && D.state) { D.state.vehicle = m.vehicle; render(); }
+    else if (m.type === 'demo' && D.state) { D.state.demo = { ...D.state.demo, ...m.demo }; renderChrome(); }
   };
 }
 setInterval(() => { if (ws && ws.readyState === 1) ws.send('ping'); }, 20000);
@@ -252,7 +253,7 @@ function climateCard() {
   const out = c.temp !== null && (c.temp < lo || c.temp > hi), bright = c.light !== null && c.light >= thr;
   const tcol = out ? 'var(--crit)' : 'var(--ok)';
   const t = lastTelemetry();
-  return `<div class="card"><div class="h"><h3>Cargo climate</h3><span class="grow"></span>${c.temp === null ? pill('mut', 'Waiting for sensor', false) : pill(out ? 'crit' : bright ? 'warn' : 'ok', out ? 'Outside limits' : bright ? 'Hold is lit' : 'In range')}</div>
+  return `<div class="card"><div class="h"><h3>Cargo climate</h3>${isMocked('temp') ? '<span class="chip simchip">Temperature mocked</span>' : ''}${isMocked('light') ? '<span class="chip simchip">Light mocked</span>' : ''}<span class="grow"></span>${c.temp === null ? pill('mut', 'Waiting for sensor', false) : pill(out ? 'crit' : bright ? 'warn' : 'ok', out ? 'Outside limits' : bright ? 'Hold is lit' : 'In range')}</div>
    <div class="b"><div class="gauges" style="margin-top:0">${gauge({ v: c.temp, min: 0, max: 15, unit: '°C', label: 'Temperature', color: tcol, band: [lo, hi], sub: `limits ${lo}–${hi}` })}
    ${gauge({ v: c.light, min: 0, max: 100, unit: '% light', label: 'Ambient light', color: bright ? 'var(--crit)' : 'var(--ok)', mark: thr, sub: `alarm ≥${thr}` })}</div>
    <div class="row" style="margin-top:8px;font-size:12.5px"><span class="mut">Humidity <b class="tn" style="color:var(--fg)">${c.hum === null ? '-' : Math.round(c.hum) + '%'}</b></span><span class="mut">Trend <b class="tn" style="color:var(--fg)">${t && t.params.slope_c_per_min != null ? (t.params.slope_c_per_min > 0 ? '+' : '') + t.params.slope_c_per_min + ' °C/min' : '-'}</b></span><span class="mut">Last ping <b class="tn" style="color:var(--fg)">${t ? fmtTime(t.ts) : '-'}</b></span></div>
@@ -304,6 +305,8 @@ function paramsText(e) {
   if (p.persons !== undefined && p.persons !== null) kv.push(`persons=${p.persons}`);
   if (p.behaviours && p.behaviours.length) kv.push(`cues=${p.behaviours.join('+')}`);
   if (p.lit) kv.push('hold_lit=true');
+  if (p.mocked && p.mocked.length) p.mocked.forEach(x => kv.push(`MOCK_${x.toUpperCase()}`)); else if (p.simulated) kv.push('MOCK_TEMP');
+  if (p.mock !== undefined) kv.push(`mock=${p.mock}`);
   ['by', 'package', 'truck', 'action', 'supervisor', 'alert', 'incident', 'file'].forEach(k => { if (p[k] !== undefined) kv.push(`${k}=${p[k]}`); });
   if (p.sha256) kv.push(`sha256=${p.sha256.slice(0, 12)}…`);
   return kv.join(' ');
@@ -477,15 +480,97 @@ function speedCard() {
 
 /* ============================== chrome ============================== */
 const TABS = [['overview', 'Overview'], ['cargo', 'Cargo'], ['maintenance', 'Maintenance'], ['route', 'Route'], ['evidence', 'Evidence']];
+/* Hold chip popover: "Mock temperature" checkbox; ticked shows a slider, unticked uses the sensor. */
+/* Says exactly which data the dashboard is showing, including the short wait while the node catches up. */
+/* Mock controls for two sensors. Each sensor has a top-bar chip that opens a popover: a "Mock ..." checkbox and,
+   when ticked, a slider. Unticked means the node uses its real sensor. */
+const MOCKS = {
+  temp: { menu: 'mock', pre: 'mock', on: 'mock', val: 'temp_c', sim: 'simulated_temp', min: 0, max: 40, unit: ' °C',
+          title: 'Hold temperature', label: 'Mock temperature', noun: 'temperature', hint: '2–8 °C safe',
+          live: () => climate().temp, text: v => `${v} °C` },
+  light: { menu: 'mocklight', pre: 'light', on: 'light_mock', val: 'light_pct', sim: 'simulated_light', min: 0, max: 100, unit: ' %',
+           title: 'Cargo light', label: 'Mock light', noun: 'light', hint: '30 % = door-open alarm',
+           live: () => climate().light, text: v => `${Math.round(v)} %` },
+};
+/* Per sensor: real | live (mock on and the node is sending it) | waiting-on (ticked, node has not caught up) | waiting-off (unticked, still showing old mock). */
+function mockStates() {
+  const d = (D.state && D.state.demo) || {};
+  const out = {};
+  for (const [k, m] of Object.entries(MOCKS)) {
+    const on = !!d[m.on], sim = !!d[m.sim];
+    out[k] = on ? (sim ? 'live' : 'waiting-on') : (sim ? 'waiting-off' : 'real');
+  }
+  return out;
+}
+const isMocked = k => ['live', 'waiting-off'].includes(mockStates()[k]);   // the value on screen is a mock value
+function renderDemoBanner() {
+  const st = mockStates(), el = $('#demoBanner');
+  const live = Object.keys(MOCKS).filter(k => st[k] === 'live').map(k => MOCKS[k].noun);
+  const parts = [];
+  if (live.length) parts.push(`<b>MOCK DATA.</b> The ${live.join(' and ')} ${live.length > 1 ? 'are' : 'is'} set from the dashboard (top bar), not measured by the sensor. Door and camera are real.`);
+  for (const k of Object.keys(MOCKS)) {
+    if (st[k] === 'waiting-on') parts.push(`<b>Mock ${MOCKS[k].noun} is on.</b> Waiting for the node to send it. (If this stays, upload the latest firmware.ino.)`);
+    if (st[k] === 'waiting-off') parts.push(`<b>Mock ${MOCKS[k].noun} is off.</b> Waiting for a real ${MOCKS[k].noun} reading; the value shown is still the last mock one.`);
+  }
+  const msg = parts.join(' · ');
+  el.hidden = !msg;
+  if (msg && el.dataset.msg !== msg) { el.innerHTML = msg; el.dataset.msg = msg; }
+}
+function lastMessageAge() {
+  const t = lastTelemetry(); if (!t) return null;
+  const a = Date.now() / 1000 - t.ts;
+  return a >= 0 && a < 3600 ? Math.round(a) : null;
+}
+function ageText() {
+  const a = lastMessageAge(), t = lastTelemetry();
+  if (a === null || !t) return 'No message from the node yet';
+  const mocked = (t.params.mocked && t.params.mocked.length) ? t.params.mocked.join(' + ') + ' mock' : (t.params.simulated ? 'temp mock' : 'real sensors');
+  return `Last message from the node ${a < 90 ? a + ' s' : Math.round(a / 60) + ' min'} ago (${mocked})`;
+}
+setInterval(() => { if (!D.state) return; for (const m of Object.values(MOCKS)) { const el = $(`#${m.pre}Age`); if (el) el.textContent = ageText(); } }, 1000);
+const mockTimers = {};
+function sendMock(kind, body) {
+  return post('/api/demo', { by: S.me, ...body }).then(d => { if (D.state) D.state.demo = { ...D.state.demo, ...d }; renderChrome(); })
+    .catch(err => { toast('crit', MOCKS[kind].label, err.message); refreshState(); });
+}
+const mockBody = (kind, on, value, log = true) => kind === 'temp'
+  ? { mock: on, temp_c: value, log } : { light_mock: on, light_pct: value, log };
+function renderMockPop(kind) {
+  const m = MOCKS[kind], p = m.pre, pop = $('#pop-' + m.menu), d = D.state && D.state.demo;
+  if (!d) return;
+  const sl = $(`#${p}Slider`), cur = m.live();
+  const on = !!d[m.on], val = d[m.val];
+  if (sl && S.menu === m.menu) {                       // open: refresh values in place so a drag is never interrupted
+    $(`#${p}Live`).textContent = cur === null ? '-' : m.text(cur);
+    $(`#${p}Age`).textContent = ageText();
+    if (document.activeElement !== sl) { sl.value = val; $(`#${p}Val`).textContent = m.text(val); }
+    const box = $(`#${p}Box`); if (document.activeElement !== box) { box.checked = on; $(`#${p}SliderWrap`).hidden = !on; }
+    return;
+  }
+  pop.innerHTML = `<div style="display:grid;gap:12px">
+    <div style="display:flex;justify-content:space-between;align-items:baseline"><b>${m.title}</b><span class="mut" style="font-size:12.5px">now <b class="tn" id="${p}Live" style="color:var(--fg)">${cur === null ? '-' : m.text(cur)}</b></span></div>
+    <label style="display:flex;gap:9px;align-items:center;${d.enabled ? '' : 'opacity:.55'}"><input type="checkbox" id="${p}Box" ${on ? 'checked' : ''} ${d.enabled ? '' : 'disabled'}> ${m.label}</label>
+    <div id="${p}SliderWrap" ${on ? '' : 'hidden'}><div style="display:flex;justify-content:space-between;font-size:12.5px;margin-bottom:6px"><span class="mut">Mock value</span><b class="tn" id="${p}Val">${m.text(val)}</b></div>
+      <input type="range" id="${p}Slider" min="${m.min}" max="${m.max}" step="1" value="${val}" style="width:100%" aria-label="${m.label}">
+      <div class="mut tn" style="display:flex;justify-content:space-between;font-size:11px"><span>${m.min}${m.unit}</span><span>${m.hint}</span><span>${m.max}${m.unit}</span></div></div>
+    <div class="note" id="${p}Age" style="margin-top:-4px">${ageText()}</div>
+    <div class="note">${d.enabled ? (on ? `The node reports this value instead of its ${m.noun} sensor. Readings are labelled as mock.` : `Unticked: the ${m.noun} comes from the sensor.`) : 'Mock data is off on this server. Start the backend with <span class="mono">--demo</span> to allow it.'}</div></div>`;
+}
 function renderChrome() {
   $('#connBanner').hidden = D.connected || !D.wsDropped;
+  renderDemoBanner();
   $$('.rail button[data-act=tab]').forEach(b => b.classList.toggle('on', b.dataset.v === S.tab));
   $$('.seg [data-act=module]').forEach(b => { b.classList.toggle('on', b.dataset.v === S.module); b.setAttribute('aria-pressed', b.dataset.v === S.module); });
   const vb = $('#voiceBtn'); vb.classList.toggle('on', S.voice); vb.setAttribute('aria-pressed', S.voice); vb.title = `Alarm sound (${S.voice ? 'on' : 'off'})`;
   $('#meName').textContent = S.me; $('#meAv').textContent = S.me.split(/\s+/).map(w => w[0]).join('').slice(0, 2).toUpperCase();
   if (!D.state) return;
   const c = counts(), cl = climate(), w = worst(), f = fleet(), v = vehicle(), al = activeAlerts();
-  $('#kpis').innerHTML = `<span class="chip">Hold <b class="tn">${cl.temp === null ? '-' : cl.temp + ' °C'}</b></span><span class="chip">Light <b class="tn">${cl.light === null ? '-' : Math.round(cl.light) + '%'}</b></span><span class="chip">Cleared <b class="tn">${c.NORMAL}/${packages().length}</b></span><span class="chip"><span class="dot ${D.connected ? 'on' : D.wsDropped ? 'off' : ''}"></span><b>${D.connected ? 'Live' : D.wsDropped ? 'Reconnecting' : 'Connecting'}</b></span>`;
+  $('#holdBtn').innerHTML = `Hold <b class="tn">${cl.temp === null ? '-' : cl.temp + ' °C'}</b>${isMocked('temp') ? ' <span class="simtag">mock</span>' : ''} <span aria-hidden="true">▾</span>`;
+  $('#holdBtn').setAttribute('aria-expanded', S.menu === 'mock');
+  $('#lightBtn').innerHTML = `Light <b class="tn">${cl.light === null ? '-' : Math.round(cl.light) + '%'}</b>${isMocked('light') ? ' <span class="simtag">mock</span>' : ''} <span aria-hidden="true">▾</span>`;
+  $('#lightBtn').setAttribute('aria-expanded', S.menu === 'mocklight');
+  renderMockPop('temp'); renderMockPop('light');
+  $('#kpis').innerHTML = `<span class="chip">Cleared <b class="tn">${c.NORMAL}/${packages().length}</b></span><span class="chip"><span class="dot ${D.connected ? 'on' : D.wsDropped ? 'off' : ''}"></span><b>${D.connected ? 'Live' : D.wsDropped ? 'Reconnecting' : 'Connecting'}</b></span>`;
   $('#crumbV').textContent = f.id; $('#vId').textContent = f.id;
   $('#vstat').innerHTML = pill(TONE[w], LABEL[w]);
   $('#vSub').textContent = `${f.model} · ${f.route.from} to ${f.route.to} · ${v.route_status || 'Idle'}`;
@@ -502,7 +587,7 @@ function renderChrome() {
     <button class="it" data-act="theme"><span>Switch theme</span><span class="mut">Dark / light</span></button>
     <a class="it" href="/api/epcis" download="coldtrust-trip.jsonld"><span>Export trip (GS1 EPCIS 2.0)</span><span class="mut">.jsonld</span></a>
     <a class="it" href="/docs" target="_blank" rel="noopener"><span>API reference</span><span class="mut">/docs</span></a>`;
-  ['bell', 'profile'].forEach(k => { $('#pop-' + k).hidden = S.menu !== k; });
+  ['bell', 'profile', 'mock', 'mocklight'].forEach(k => { $('#pop-' + k).hidden = S.menu !== k; });
 }
 function renderView() {
   if (!D.state) return;
@@ -617,7 +702,23 @@ document.addEventListener('click', e => {
     act(() => post(`/api/package/${encodeURIComponent(v)}/override`, { status: S.ovStatus, reason, supervisor: S.me }), 'Override logged', `${v} is now ${LABEL[S.ovStatus]}`);
   }
 });
+const kindOf = id => (id === 'mockSlider' || id === 'mockBox') ? 'temp' : (id === 'lightSlider' || id === 'lightBox') ? 'light' : null;
+document.addEventListener('input', e => {
+  const kind = kindOf(e.target.id);
+  if (!kind || !e.target.id.endsWith('Slider')) return;
+  const m = MOCKS[kind];
+  $(`#${m.pre}Val`).textContent = m.text(+e.target.value);
+  clearTimeout(mockTimers[kind]);                       // follow the slider while dragging, without flooding the log
+  mockTimers[kind] = setTimeout(() => sendMock(kind, mockBody(kind, true, +e.target.value, false)), 250);
+});
 document.addEventListener('change', e => {
+  const kind = kindOf(e.target.id);
+  if (kind && e.target.id.endsWith('Box')) {
+    const m = MOCKS[kind], sl = $(`#${m.pre}Slider`), on = e.target.checked;
+    $(`#${m.pre}SliderWrap`).hidden = !on;
+    sendMock(kind, mockBody(kind, on, sl ? +sl.value : undefined));
+  }
+  if (kind && e.target.id.endsWith('Slider')) { clearTimeout(mockTimers[kind]); sendMock(kind, mockBody(kind, true, +e.target.value)); }
   if (e.target.id === 'meInput') { const n = e.target.value.trim(); if (n) { S.me = n.slice(0, 60); store.set('me', S.me); renderChrome(); } }
 });
 document.addEventListener('focusout', () => { if (S.pendingRender) setTimeout(() => { const a = document.activeElement; if (!(a && $('#view').contains(a) && /^(INPUT|SELECT|TEXTAREA)$/.test(a.tagName))) { S.pendingRender = false; renderView(); } }, 0); });

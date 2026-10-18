@@ -66,6 +66,10 @@ class Settings:
     # EPCIS
     tz_offset: str = os.getenv("COLDTRUST_TZ_OFFSET", "-05:00")  # demo route is Dallas-Memphis (US Central, CDT)
 
+    # Demo: lets the dashboard drive a simulated temperature on a node whose sensor cannot show room temperature.
+    # Off by default; simulated readings are always labelled as simulated in the dashboard, audit log and EPCIS.
+    demo_enabled: bool = _bool("COLDTRUST_DEMO", False)
+
     # Demo helpers
     budget_scale: float = _float("COLDTRUST_BUDGET_SCALE", 1.0)  # <1 shrinks excursion budgets for demos
 

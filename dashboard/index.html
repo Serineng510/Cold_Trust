@@ -7,7 +7,7 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Instrument+Sans:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="styles.css?v=3">
+<link rel="stylesheet" href="styles.css?v=7">
 </head>
 <body>
 <div class="app">
@@ -35,7 +35,17 @@
         <button data-act="module" data-v="delivery">Delivery</button>
         <button data-act="module" data-v="logistics">Logistics</button>
       </div>
-      <div class="chips" id="kpis"></div>
+      <div class="chips">
+        <div class="relw">
+          <button class="chip chipbtn" id="holdBtn" data-act="menu" data-v="mock" aria-haspopup="dialog" aria-expanded="false">Hold -</button>
+          <div class="pop" id="pop-mock" hidden style="left:0;width:300px;max-width:calc(100vw - 32px);padding:14px"></div>
+        </div>
+        <div class="relw">
+          <button class="chip chipbtn" id="lightBtn" data-act="menu" data-v="mocklight" aria-haspopup="dialog" aria-expanded="false">Light -</button>
+          <div class="pop" id="pop-mocklight" hidden style="left:0;width:300px;max-width:calc(100vw - 32px);padding:14px"></div>
+        </div>
+        <div class="chips" id="kpis"></div>
+      </div>
       <div class="grow"></div>
       <button class="ico-btn" id="voiceBtn" data-act="voice" aria-pressed="true" title="Alarm sound (on)" aria-label="Alarm sound"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9"><path d="M4 9v6h4l5 4V5L8 9z"/><path d="M16 9a4 4 0 0 1 0 6M18.5 6.5a8 8 0 0 1 0 11"/></svg></button>
       <div class="relw">
@@ -49,6 +59,7 @@
     </header>
 
     <div class="ticker" aria-live="polite"><span class="lbl">ACTIVE ALERTS</span><div class="track" id="ticker"></div></div>
+    <div id="demoBanner" class="banner demo" hidden><b>MOCK DATA.</b></div>
     <div id="soundBanner" class="banner info" hidden>An alert arrived but the browser blocked its alarm sound. Click anywhere on the page to turn alarm sound on.</div>
     <div id="connBanner" class="banner" hidden>Live connection to the backend lost. Retrying; the page refreshes every 10 s meanwhile.</div>
 
@@ -68,6 +79,6 @@
   </div>
 </div>
 <div class="toast" id="toast" aria-live="assertive"></div>
-<script src="app.js?v=3"></script>
+<script src="app.js?v=7"></script>
 </body>
 </html>

@@ -21,11 +21,15 @@ def main() -> None:
                     help="trust the device clock so simulated scenarios can run instantly (disables the timestamp-window check)")
     ap.add_argument("--reset", action="store_true", help="delete the local database and evidence before starting")
     ap.add_argument("--no-telegram", action="store_true", help="never send Telegram messages (testing)")
+    ap.add_argument("--demo", action="store_true",
+                    help="enable the dashboard's simulated-temperature controls (for demos; readings stay labelled)")
     ap.add_argument("--db", help="database file (default data/coldtrust.db); give each running server its own")
     a = ap.parse_args()
 
     if a.timelapse:
         os.environ["COLDTRUST_STRICT_TIME"] = "0"
+    if a.demo:
+        os.environ["COLDTRUST_DEMO"] = "1"
     if a.no_telegram:  # an empty value wins over cold-chain/.env
         os.environ["TELEGRAM_BOT_TOKEN"] = ""
     if a.db:

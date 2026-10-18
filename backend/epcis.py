@@ -295,7 +295,7 @@ def departing_event(epcs: list[str], when: float, tz: str, location: str, vehicl
 
 def transport_event(epcs: list[str], when: float, tz: str, *, read_point: str | None, vehicle: str, device: str,
                     samples: list[Any], hold_limits: tuple[float, float], light_alarm_pct: float,
-                    data_suspect: bool, audit_id: int | None) -> dict[str, Any]:
+                    data_suspect: bool, audit_id: int | None, simulated: bool = False) -> dict[str, Any]:
     """One sensorElement per device payload: min/max/mean instead of every 5 s sample."""
     temps = [s.temp_c for s in samples]
     hums = [s.hum for s in samples]
@@ -325,6 +325,8 @@ def transport_event(epcs: list[str], when: float, tz: str, *, read_point: str | 
         "sensorReport": reports,
     }]
     ev["ct:vehicle"] = vehicle
+    if simulated:
+        ev["ct:simulated"] = True          # demo data must never pass for a real measurement
     if audit_id is not None:
         ev["ct:auditEntry"] = audit_id
     return with_event_id(ev)

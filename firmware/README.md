@@ -134,6 +134,13 @@ From the `cold-chain` folder:
 - On real hardware (no `--timelapse`) the camera's uploads carry the device key from `cold-chain/.env`, so
   nobody else on the Wi-Fi can fake a sighting.
 
+## Mock temperature and light (demo aid)
+
+Start the backend with `--demo`. In the dashboard click the **Hold** chip (temperature) or the **Light** chip: untick
+**Mock ...** to use the real sensor, tick it to get a slider that sets the value the node reports (checked every 2 s,
+`ALLOW_MOCK = true` in `firmware.ino`). Mock readings are labelled on the dashboard, in the log and in the EPCIS export.
+Door-open and theft rules react to mocked light like real light. Set `ALLOW_MOCK = false` for strictly real measurements.
+
 ## Troubleshooting
 
 | Symptom | Likely cause |
