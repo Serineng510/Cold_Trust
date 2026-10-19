@@ -81,7 +81,7 @@ def _ramp(t, t_a, t_b, v_a, v_b):
 
 
 def normal_drive(clock: Clock, minutes: int = 6) -> list[Step]:
-    veh = {"speed_mph": 58, "zone": None, "authorised_stop": False, "route_status": "En route"}
+    veh = {"speed_kmh": 90, "zone": None, "authorised_stop": False, "route_status": "En route"}
     return [Step(at=m * BATCH_S,
                  samples=clock.window(m * BATCH_S, lambda t: 3 + 0.3 * ((t // 60) % 2), lambda t: DARK),
                  vehicle=veh if m == 1 else None)
@@ -115,7 +115,7 @@ def theft(clock: Clock) -> list[Step]:
 def authorised_stop(clock: Clock) -> list[Step]:
     steps = normal_drive(clock, 2)
     t = 2 * BATCH_S + 10
-    steps.append(Step(at=t, samples=[], vehicle={"speed_mph": 0, "zone": "Johor Bahru Dock 4",
+    steps.append(Step(at=t, samples=[], vehicle={"speed_kmh": 0, "zone": "Johor Bahru Dock 4",
                                                  "authorised_stop": True, "route_status": "Unloading"}))
     light = lambda x: BRIGHT if x >= t else DARK
     steps.append(Step(at=t + DT, samples=clock.window(t + DT, lambda x: 3, light, span=30),
@@ -127,7 +127,7 @@ def compressor_fail(clock: Clock) -> list[Step]:
     temp = lambda t: _ramp(t, 4 * 60, 30 * 60, 3, 13)
     return [Step(at=m * BATCH_S, samples=clock.window(m * BATCH_S, temp, lambda t: DARK),
                  ping_type="EVENT" if m in (14, 20) else "ROUTINE", trigger="RATE" if m in (14, 20) else None,
-                 vehicle={"speed_mph": 61, "route_status": "En route", "authorised_stop": False} if m == 1 else None)
+                 vehicle={"speed_kmh": 100, "route_status": "En route", "authorised_stop": False} if m == 1 else None)
             for m in range(1, 46)]
 
 
@@ -149,7 +149,7 @@ def replay(clock: Clock) -> list[Step]:
 def spoof(clock: Clock) -> list[Step]:
     """Door reads open for 7 min in hot weather, yet the hold temperature never moves."""
     steps = normal_drive(clock, 1)
-    veh = {"speed_mph": 60, "authorised_stop": False, "zone": None}
+    veh = {"speed_kmh": 95, "authorised_stop": False, "zone": None}
     for m in range(2, 10):
         steps.append(Step(at=m * BATCH_S, samples=clock.window(m * BATCH_S, lambda t: 3, lambda t: BRIGHT)))
     steps[0].vehicle = veh
@@ -157,10 +157,10 @@ def spoof(clock: Clock) -> list[Step]:
 
 
 def stopped_theft(clock: Clock) -> list[Step]:
-    """Route active, the truck stops mid-route (0 mph, no depot or dock) and the cargo door opens."""
+    """Route active, the truck stops mid-route (0 km/h, no depot or dock) and the cargo door opens."""
     steps = normal_drive(clock, 2)
     t = 2 * BATCH_S + 20
-    steps.append(Step(at=t, samples=[], vehicle={"speed_mph": 0, "route_status": "En route", "authorised_stop": False}))
+    steps.append(Step(at=t, samples=[], vehicle={"speed_kmh": 0, "route_status": "En route", "authorised_stop": False}))
     light = lambda x: BRIGHT if x >= t + 10 else DARK
     steps.append(Step(at=t + 15, samples=clock.window(t + 15, lambda x: 3, light, span=30),
                       ping_type="EVENT", trigger="LIGHT"))
@@ -176,7 +176,7 @@ def sensor_disagree(clock: Clock) -> list[Step]:
         for x in samples:
             x["temp2_c"] = round(3.2 + max(0.0, (x["t"] - 120) / 240 * 7), 1)
         steps.append(Step(at=m * BATCH_S, samples=samples,
-                          vehicle={"speed_mph": 59, "authorised_stop": False, "zone": None} if m == 1 else None))
+                          vehicle={"speed_kmh": 95, "authorised_stop": False, "zone": None} if m == 1 else None))
     return steps
 
 
@@ -190,7 +190,7 @@ SCENARIOS: dict[str, tuple[str, Callable[[Clock], list[Step]]]] = {
     "replay": ("Attacker resends a captured payload", replay),
     "spoof": ("Door open 7 min yet temperature perfectly flat", spoof),
     "sensor_disagree": ("Second thermometer disagrees with the DHT11 (one sensor faked or failing)", sensor_disagree),
-    "stopped_theft": ("Route active, truck stops mid-route at 0 mph and the door opens (theft rule)", stopped_theft),
+    "stopped_theft": ("Route active, truck stops mid-route at 0 km/h and the door opens (theft rule)", stopped_theft),
 }
 
 

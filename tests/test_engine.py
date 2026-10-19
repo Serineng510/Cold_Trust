@@ -190,25 +190,25 @@ def _light_event(eng, base=1_800_000_000):
 
 
 def test_light_while_stopped_on_an_active_route_is_theft(eng):
-    eng.set_vehicle({"route_status": "En route", "speed_mph": 0, "authorised_stop": False})
+    eng.set_vehicle({"route_status": "En route", "speed_kmh": 0, "authorised_stop": False})
     r = _light_event(eng)
     assert r["scenario"] == "THEFT_SUSPECTED" and r["entry"]["severity"] == "emergency" and r["notify"]
-    assert "stopped (0 mph) on an active route" in r["entry"]["reasoning"]
+    assert "stopped (0 km/h) on an active route" in r["entry"]["reasoning"]
     assert {p["status"] for p in eng.store.list_packages()} == {"QUARANTINED"}
 
 
 def test_light_while_driving_is_door_ajar_not_theft(eng):
-    eng.set_vehicle({"route_status": "En route", "speed_mph": 55, "authorised_stop": False})
+    eng.set_vehicle({"route_status": "En route", "speed_kmh": 55, "authorised_stop": False})
     assert _light_event(eng)["scenario"] == "DOOR_AJAR"
 
 
 def test_light_while_stopped_before_the_route_is_active_is_not_theft(eng):
-    eng.set_vehicle({"route_status": "Idle", "speed_mph": 0, "authorised_stop": False})
+    eng.set_vehicle({"route_status": "Idle", "speed_kmh": 0, "authorised_stop": False})
     assert _light_event(eng)["scenario"] == "DOOR_AJAR"
 
 
 def test_light_while_stopped_at_an_authorised_dock_is_handling(eng):
-    eng.set_vehicle({"route_status": "En route", "speed_mph": 0, "authorised_stop": True, "zone": "Johor Bahru Dock 4"})
+    eng.set_vehicle({"route_status": "En route", "speed_kmh": 0, "authorised_stop": True, "zone": "Johor Bahru Dock 4"})
     assert _light_event(eng)["scenario"] == "AUTHORISED_HANDLING"
 
 
@@ -217,14 +217,52 @@ def test_simulated_stopped_theft_scenario(eng):
     assert res[-1]["scenario"] == "THEFT_SUSPECTED" and res[-1]["notify"]
 
 
-def test_door_open_at_a_dock_does_not_hide_a_temperature_alarm(eng):
-    eng.set_vehicle({"route_status": "En route", "speed_mph": 0, "authorised_stop": True, "zone": "Johor Bahru Dock 4"})
+DOCK = {"route_status": "En route", "speed_kmh": 0, "authorised_stop": True, "zone": "Johor Bahru Dock 4"}
+
+
+def _lit(temp, n, base=1_800_000_000, seq=1):
+    return [{"t": base + i * 5, "temp_c": temp, "hum": 50, "light": 700 + i % 3} for i in range(1, n + 1)]
+
+
+def test_dock_door_open_with_a_warm_hold_is_handling_at_first(eng):
+    """Your rule 5: authorised stop + bright + temperature out of range = handling (the open door explains it)."""
+    eng.set_vehicle(DOCK)
+    r = eng.ingest(IngestIn(**build_payload(1, 1_800_000_060, _lit(11, 12), "EVENT", "LIGHT")))
+    assert r["scenario"] == "AUTHORISED_HANDLING" and r["notify"] is False
+    assert any(pk["status"] == "UNDER_REVIEW" for pk in eng.store.list_packages())   # still tracked, never hidden
+    assert "alert follows" in r["entry"]["reasoning"]
+
+
+def test_dock_warm_hold_becomes_an_alert_after_the_grace_period(eng):
+    eng.set_vehicle(DOCK)
+    base = 1_800_000_000                                           # about 11 minutes with the door open, warming 9 -> 15 C
+    long_run = [{"t": base + i * 5, "temp_c": 9 + i // 22, "hum": 50, "light": 700 + i % 3} for i in range(1, 131)]
+    r = eng.ingest(IngestIn(**build_payload(1, 1_800_000_000 + 135 * 5, long_run, "EVENT", "LIGHT")))
+    assert r["scenario"] == "THERMAL_EXCURSION" and r["notify"] is True
+
+
+def test_cooling_at_a_dock_is_never_excused_by_the_open_door(eng):
+    eng.set_vehicle(DOCK)
+    r = eng.ingest(IngestIn(**build_payload(1, 1_800_000_060, _lit(-3, 12), "EVENT", "LIGHT")))
+    assert r["scenario"] == "FREEZE_RISK" and r["notify"] is True
+
+
+def test_dock_door_open_with_a_fine_temperature_is_handling(eng):
+    eng.set_vehicle(DOCK)
+    assert eng.ingest(IngestIn(**build_payload(1, 1_800_000_060, _lit(3, 12), "EVENT", "LIGHT")))["scenario"] == "AUTHORISED_HANDLING"
+
+
+def test_a_five_degree_jump_within_a_minute_is_a_sudden_change(eng):
+    assert Settings().step_change_c == 5.0
     base = 1_800_000_000
-    hot = [{"t": base + i * 5, "temp_c": 11, "hum": 50, "light": 700 + i % 3} for i in range(1, 13)]
-    r = eng.ingest(IngestIn(**build_payload(1, base + 60, hot, "EVENT", "LIGHT")))
-    assert r["scenario"] == "THERMAL_EXCURSION" and r["notify"] is True        # not swallowed as "handling"
-    cool = [{"t": base + 60 + i * 5, "temp_c": 3, "hum": 50, "light": 700 + i % 3} for i in range(1, 13)]
-    eng2 = Engine(Store(":memory:"), Settings(strict_time=False, device_secret=SECRET))
-    seed(eng2.store)
-    eng2.set_vehicle({"route_status": "En route", "speed_mph": 0, "authorised_stop": True, "zone": "Johor Bahru Dock 4"})
-    assert eng2.ingest(IngestIn(**build_payload(1, base + 120, cool, "EVENT", "LIGHT")))["scenario"] == "AUTHORISED_HANDLING"
+    samples = [{"t": base + i * 5, "temp_c": 2 if i <= 2 else 7, "hum": 50, "light": 20 + i % 3} for i in range(1, 13)]
+    r = eng.ingest(IngestIn(**build_payload(1, base + 65, samples)))
+    assert "TEMP_STEP" in {f["code"] for f in r["entry"]["findings"]}
+    assert r["scenario"] == "THERMAL_EXCURSION" and r["notify"] is True
+
+
+def test_a_four_degree_jump_is_not_a_step(eng):
+    base = 1_800_000_000
+    samples = [{"t": base + i * 5, "temp_c": 3 if i <= 2 else 7, "hum": 50, "light": 20 + i % 3} for i in range(1, 13)]
+    r = eng.ingest(IngestIn(**build_payload(1, base + 65, samples)))
+    assert "TEMP_STEP" not in {f["code"] for f in r["entry"]["findings"]}

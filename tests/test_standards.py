@@ -157,11 +157,11 @@ def test_watchdog_reports_silence_once_and_recovery_once():
 
 def test_watchdog_flags_stale_gps_only_while_en_route():
     eng = _live_engine()
-    eng.set_vehicle({"speed_mph": 55, "authorised_stop": False})
+    eng.set_vehicle({"speed_kmh": 55, "authorised_stop": False})
     t = eng.store.kv_get("vehicle")["updated_at"]
     assert "GPS_STALE" in [x["entry"]["kind"] for x in eng.check_health(t + eng.cfg.gps_stale_s + 1)]
     parked = _live_engine()
-    parked.set_vehicle({"speed_mph": 0, "authorised_stop": True})
+    parked.set_vehicle({"speed_kmh": 0, "authorised_stop": True})
     t = parked.store.kv_get("vehicle")["updated_at"]
     assert parked.check_health(t + parked.cfg.gps_stale_s + 1) == []
 
@@ -215,12 +215,12 @@ def test_epcis_endpoints(monkeypatch, tmp_path):
 
 
 def test_gps_position_sets_zone_and_authorised_stop(eng):
-    eng.set_vehicle({"lat": 3.0738, "lon": 101.5183, "speed_mph": 0})       # parked at Shah Alam Depot
+    eng.set_vehicle({"lat": 3.0738, "lon": 101.5183, "speed_kmh": 0})       # parked at Shah Alam Depot
     v = eng.store.kv_get("vehicle")
     assert v["zone"] == "Shah Alam Depot" and v["authorised_stop"] is True
-    eng.set_vehicle({"lat": 2.9000, "lon": 101.7000, "speed_mph": 60})      # on the highway
+    eng.set_vehicle({"lat": 2.9000, "lon": 101.7000, "speed_kmh": 60})      # on the highway
     v = eng.store.kv_get("vehicle")
     assert v["zone"] is None and v["authorised_stop"] is False
-    eng.set_vehicle({"lat": 2.0136, "lon": 103.0599, "speed_mph": 0})              # stopped in the high-risk zone
+    eng.set_vehicle({"lat": 2.0136, "lon": 103.0599, "speed_kmh": 0})              # stopped in the high-risk zone
     v = eng.store.kv_get("vehicle")
     assert v["zone"] == "NSE High-Risk Stretch" and v["authorised_stop"] is False

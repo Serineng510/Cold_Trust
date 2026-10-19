@@ -42,6 +42,14 @@ falls back to a schematic SVG if Leaflet is missing). The route is real road geo
 running system makes no routing calls. Re-run `.venv\Scripts\python -m tools.fetch_route` after changing stops.
 OSM's tile servers and the OSRM demo server are for light use; do not point a large public deployment at them.
 
+## Maintenance review
+
+The Maintenance tab has a **Maintenance review** card: choose the last 6 h, 24 h or 7 days (longer periods are summarised per
+day). `GET /api/maintenance?hours=168` returns the numbers (plain arithmetic). The **Summarise with AI** button
+(`POST /api/maintenance/summary`) asks the Thermal agent to put them into words: one free call per press, the same numbers
+are answered from a 10-minute cache, and with the AI off, paused or out of free calls you get the rule-based summary.
+Use a real (official) database for a weekly view: the demo database is wiped at every start.
+
 ## Configuration (environment)
 
 | Variable | Default | Meaning |
@@ -55,6 +63,7 @@ OSM's tile servers and the OSRM demo server are for light use; do not point a la
 | `TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHAT_IDS` | unset | Comma-separated chat ids for driver and admin |
 | `COLDTRUST_BUDGET_SCALE` | `1.0` | Multiply excursion budgets (e.g. `0.1` for a short live demo) |
 | `COLDTRUST_RATE_C_PER_MIN` / `_STEP_C` / `_LIGHT_PCT` | `0.5` / `5` / `30` | Detection thresholds |
+| `COLDTRUST_HANDLING_GRACE_S` | `600` | At an authorised stop a warm hold with the door open is handling for this long; then it is an alert. A cooling hold is never excused |
 | `COLDTRUST_AMBIENT_C` | `31` | Outside temperature for the "door open but nothing changed" check |
 | `COLDTRUST_DB` / `COLDTRUST_EVIDENCE_DIR` | `data/...` | Storage locations |
 | `COLDTRUST_SILENT_AFTER_S` / `COLDTRUST_GPS_STALE_S` | `1800` / `600` | Watchdog thresholds |

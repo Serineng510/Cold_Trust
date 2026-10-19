@@ -5,7 +5,7 @@ Routing: Project OSRM (BSD-2). Map data: (c) OpenStreetMap contributors, ODbL.
 from __future__ import annotations
 
 ROUTE_STOPS = ['Shah Alam Depot', 'Seremban Cold Store', 'Melaka Dock 2', 'Johor Bahru Dock 4']
-ROUTE_DISTANCE_MI = 224.1
+ROUTE_DISTANCE_KM = 360.7
 ROUTE_DURATION_MIN = 262
 ROUTE_SOURCE = 'OSRM via router.project-osrm.org; map data OpenStreetMap contributors'
 

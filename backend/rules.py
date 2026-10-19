@@ -106,6 +106,20 @@ def out_of_range_now(samples: Sequence[Sample], lo: float, hi: float, consecutiv
     return bool(tail) and all(s.temp_c < lo or s.temp_c > hi for s in tail)
 
 
+def out_of_limits_run_s(samples: Sequence[Sample], limits: Sequence[tuple[float, float]]) -> float:
+    """Seconds the hold has been outside the limits of at least one package, without a break, up to the newest sample."""
+    def out(s: Sample) -> bool:
+        return any(s.temp_c < lo or s.temp_c > hi for lo, hi in limits)
+    if not samples or not out(samples[-1]):
+        return 0.0
+    start = samples[-1].t
+    for s in reversed(samples):
+        if not out(s):
+            break
+        start = s.t
+    return samples[-1].t - start
+
+
 def is_bright(sample: Sample, threshold_pct: float) -> bool:
     return sample.light_pct >= threshold_pct
 

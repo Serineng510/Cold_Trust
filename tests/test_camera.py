@@ -31,14 +31,14 @@ def statuses(eng):
 
 
 def test_person_at_authorised_stop_is_logged_not_alerted(eng):
-    eng.set_vehicle({"speed_mph": 0, "authorised_stop": True, "zone": "Johor Bahru Dock 4"})
+    eng.set_vehicle({"speed_kmh": 0, "authorised_stop": True, "zone": "Johor Bahru Dock 4"})
     r = eng.person_observed(person(), now=1000)
     assert r["entry"]["kind"] == "PERSON_AT_AUTHORISED_STOP" and r["notify"] is False
     assert statuses(eng) == {"NORMAL"}
 
 
 def test_person_outside_authorised_stop_is_suspicious(eng):
-    eng.set_vehicle({"speed_mph": 58, "authorised_stop": False})
+    eng.set_vehicle({"speed_kmh": 58, "authorised_stop": False})
     r = eng.person_observed(person(1, ["reaching"]), now=1000)
     e = r["entry"]
     assert e["kind"] == "SUSPICIOUS_PERSON" and e["severity"] == "critical" and r["notify"]
@@ -48,7 +48,7 @@ def test_person_outside_authorised_stop_is_suspicious(eng):
 
 
 def test_same_person_is_not_logged_twice_but_new_behaviour_is(eng):
-    eng.set_vehicle({"speed_mph": 58, "authorised_stop": False})
+    eng.set_vehicle({"speed_kmh": 58, "authorised_stop": False})
     assert eng.person_observed(person(), now=1000)
     assert eng.person_observed(person(), now=1015) is None
     again = eng.person_observed(person(1, ["crouching"]), now=1030)
@@ -58,7 +58,7 @@ def test_same_person_is_not_logged_twice_but_new_behaviour_is(eng):
 
 
 def test_person_with_door_open_is_theft(eng):
-    eng.set_vehicle({"speed_mph": 0, "authorised_stop": False, "zone": "NSE High-Risk Stretch"})
+    eng.set_vehicle({"speed_kmh": 0, "authorised_stop": False, "zone": "NSE High-Risk Stretch"})
     base = 1_800_000_000
     samples = [{"t": base + i * 5, "temp_c": 3, "hum": 50, "light": 700 + i % 3} for i in range(1, 7)]
     from backend.schemas import IngestIn
@@ -98,7 +98,7 @@ def test_live_frame_upload_status_and_latest(monkeypatch, tmp_path):
 
 def test_camera_endpoints_need_the_device_key_on_real_hardware(monkeypatch, tmp_path):
     client = _client(monkeypatch, tmp_path, strict=True)
-    client.post("/api/vehicle", json={"speed_mph": 55, "authorised_stop": False})  # on the road, not at the depot
+    client.post("/api/vehicle", json={"speed_kmh": 55, "authorised_stop": False})  # on the road, not at the depot
     obs = {"person_present": True, "persons": 1}
     assert client.post("/api/camera/observation", json=obs).status_code == 401
     assert client.post("/api/camera/frame", content=JPEG).status_code == 401

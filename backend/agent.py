@@ -9,6 +9,7 @@ import base64
 import binascii
 import hashlib
 import hmac
+import json
 import logging
 import os
 import re
@@ -23,12 +24,12 @@ from fastapi.exceptions import RequestValidationError
 from fastapi.responses import FileResponse, JSONResponse, Response, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 
-from . import epcis
+from . import epcis, maintenance
 from .config import DEFAULT_SECRET, load
 from .engine import Engine, STATUS_LABEL
 from .llm import Explainer
 from .notify import Notifier
-from .schemas import (ActorIn, CameraObservationIn, DemoMockIn, EvidenceIn, IngestIn, OverrideIn, ReassignIn,
+from .schemas import (ActorIn, CameraObservationIn, DemoMockIn, EvidenceIn, IngestIn, MaintenanceIn, OverrideIn, ReassignIn,
                       VehicleActionIn, VehicleIn)
 from .seed import GEOFENCES, ROUTE, VEHICLE, seed
 from .store import Store
@@ -115,15 +116,30 @@ async def _deliver(entry: dict[str, Any]) -> None:
         await asyncio.to_thread(notifier.send, text)
 
 
+AI_MIN_GAP_S = 60
+_ai_last: dict[str, float] = {}
+
+
+def _ai_due(entry: dict[str, Any], now: float | None = None) -> bool:
+    """New and escalated problems are always explained. Repeats of the same situation (status changes, reminders)
+    within a minute keep their rule-based text, so a burst of events cannot burn the free-tier allowance."""
+    now = time.time() if now is None else now
+    key = entry.get("scenario") or entry.get("kind")
+    if entry.get("notify_reason") in ("status_change", "reminder") and now - _ai_last.get(key, 0) < AI_MIN_GAP_S:
+        return False
+    _ai_last[key] = now
+    return True
+
+
 async def _refine(entry: dict[str, Any]) -> None:
     """Replace the template explanation with the AI agent's once it arrives (status is never changed here)."""
-    if not explainer.enabled:
+    if not explainer.enabled or not _ai_due(entry):
         return
     packages = {p["id"]: p for p in store.list_packages()}
     ctx = {
         "scenario": entry["scenario"], "severity": entry["severity"], "trigger": entry.get("trigger"),
         "findings": entry["findings"], "readings": entry["params"],
-        "vehicle": {k: v for k, v in store.kv_get("vehicle", {}).items() if k in ("speed_mph", "zone", "authorised_stop")},
+        "vehicle": {k: v for k, v in store.kv_get("vehicle", {}).items() if k in ("speed_kmh", "zone", "authorised_stop")},
         "status_decided_by_rules": entry["verdict_label"], "risk_score": entry["risk_score"],
         "products": [
             {"id": pid, "description": pk["description"], "limits_c": [pk["temp_min_c"], pk["temp_max_c"]],
@@ -182,8 +198,22 @@ async def event(payload: IngestIn) -> dict[str, Any]:
 
 @app.post("/api/vehicle")
 async def vehicle(v: VehicleIn) -> dict[str, Any]:
-    cur = engine.set_vehicle(v.model_dump(exclude_none=True))
+    data = v.model_dump(exclude_none=True)
+    # A vehicle with any speed is driving, so its route is active: same as pressing "Activate Route". Only an idle
+    # vehicle is switched on; Offline and Maintenance are deliberate choices and are left alone.
+    speed = data.get("speed_kmh") or 0
+    activate = speed > 0 and "route_status" not in data and (store.kv_get("vehicle", {}).get("route_status") or "Idle") == "Idle"
+    if activate:
+        data["route_status"] = "En route"
+    cur = engine.set_vehicle(data)
+    if activate and "lat" not in data:
+        cur.update(authorised_stop=False, zone=None)  # it has left the depot, as with "Activate Route"
+        store.kv_set("vehicle", cur)
     await broadcast({"type": "vehicle", "vehicle": cur})
+    if activate:
+        entry = _human_entry("VEHICLE_ACTION", "system", f"Route activated: the vehicle started moving ({speed:g} km/h).",
+                             {"action": "activate", "speed_kmh": speed}, [])
+        await broadcast({"type": "audit", "entry": entry})
     return cur
 
 
@@ -281,7 +311,7 @@ async def evidence(e: EvidenceIn, x_coldtrust_key: str | None = Header(default=N
         "severity": "info", "device_id": e.device_id,
         "params": {"file": name, "sha256": digest, "bytes": len(raw), "detected": e.trigger,
                    "zone": where.get("zone"), "lat": where.get("lat"), "lon": where.get("lon"),
-                   "speed_mph": where.get("speed_mph")},
+                   "speed_kmh": where.get("speed_kmh")},
         "findings": [], "verdict": "NORMAL", "verdict_label": "-", "risk_score": 0, "affected": [], "actions":
         [f"Frame stored, SHA-256 {digest[:16]}..."], "reasoning": "Evidence frame captured.",
         "recommended_actions": [], "explanation_source": "rules", "notified": False,
@@ -337,6 +367,53 @@ async def readings(minutes: int = 60) -> list[dict[str, float]]:
     until = store.last_sample_t(VEHICLE["device_id"]) or time.time()
     rows = store.recent_readings(VEHICLE["device_id"], max(1, min(minutes, 360)) * 60, until)
     return [{"t": r.t, "temp_c": r.temp_c, "hum": r.hum, "light_pct": round(r.light_pct, 1)} for r in rows]
+
+
+def _maint_report(hours: int) -> dict[str, Any]:
+    device = VEHICLE["device_id"]
+    until = store.last_sample_t(device) or time.time()
+    samples = store.recent_readings(device, max(1, min(hours, 168)) * 3600, until)
+    return maintenance.report(samples, hours=hours, hold_limits=VEHICLE["hold_limits_c"], bright_pct=cfg.light_bright_pct,
+                              tz_offset=cfg.tz_offset)
+
+
+@app.get("/api/maintenance")
+async def maintenance_report(hours: int = 24) -> dict[str, Any]:
+    """Early-warning indicators for the last 6 h, 24 h or 7 days, overall and per day. Plain arithmetic, no AI."""
+    return _maint_report(max(1, min(hours, 168)))
+
+
+MAINT_CACHE_S = 600
+_maint_cache: dict[str, tuple[float, dict[str, Any]]] = {}
+
+
+@app.post("/api/maintenance/summary")
+async def maintenance_summary(body: MaintenanceIn) -> dict[str, Any]:
+    """The Thermal agent's written maintenance review. One AI call per press; the same numbers are answered from a
+    10-minute cache, and with the AI off, paused or out of free calls the rule-based summary is returned instead."""
+    rep = _maint_report(body.hours)
+    key = hashlib.sha256(json.dumps(rep, sort_keys=True, default=str).encode()).hexdigest()
+    hit = _maint_cache.get(key)
+    if hit and time.time() - hit[0] < MAINT_CACHE_S:
+        return {**hit[1], "cached": True, "usage": explainer.usage()}
+    res, note = None, None
+    if not explainer.enabled:
+        note = "The AI agents are off (no API key), so this is the rule-based summary."
+    elif not rep["enough_data"]:
+        note = "Not enough history to ask the AI, so this is the rule-based summary."
+    else:
+        res = await asyncio.to_thread(explainer.maintenance, rep)
+        if res is None:
+            reason = explainer.guard.blocked_reason
+            note = (f"The AI is paused ({reason}), so this is the rule-based summary." if reason
+                    else "The AI did not give a usable answer, so this is the rule-based summary.")
+    summary = {k: res[k] for k in ("assessment", "cooling_unit", "urgency", "evidence", "recommended_actions")} if res \
+        else maintenance.rule_summary(rep)
+    out = {"source": "ai" if res else "rules", "agent": res["explained_by"] if res else None, "summary": summary,
+           "note": note, "hours": body.hours, "cached": False, "usage": explainer.usage()}
+    if res:
+        _maint_cache[key] = (time.time(), {k: v for k, v in out.items() if k not in ("usage", "cached")})
+    return out
 
 
 @app.post("/api/package/{pkg_id}/override")

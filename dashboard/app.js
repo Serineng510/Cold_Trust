@@ -66,9 +66,9 @@ const S = {
   tab: store.get('tab', 'overview'), sel: null, filter: 'all', module: store.get('module', 'delivery'),
   voice: store.get('voice', true), menu: null, mapRoutes: true, mapFences: true, mapAlerts: true, alogOpen: true,
   reassign: false, ovStatus: 'UNDER_REVIEW', incSel: null, reviewed: {}, q: '', me: store.get('me', 'Lisa Nguyen'),
-  termStick: true, termTop: 0, pendingRender: false, spoken: new Set(), toasted: new Set(),
+  mrange: +store.get('mrange', 24), termStick: true, termTop: 0, pendingRender: false, spoken: new Set(), toasted: new Set(),
 };
-const D = { state: null, audit: [], readings: [], readingsLong: [], config: null, connected: false, loaded: false, feed: { live: false } };
+const D = { state: null, audit: [], readings: [], readingsLong: [], maint: null, maintAI: null, maintBusy: false, config: null, connected: false, loaded: false, feed: { live: false } };
 /* One <img> for the live MJPEG stream, moved between renders so the stream never restarts. */
 const camImg = new Image();
 camImg.alt = 'Live cargo-hold camera with person detection overlay';
@@ -105,7 +105,7 @@ async function loadAll() {
     audit.forEach(e => { S.spoken.add(e.id); S.toasted.add(e.id); });  // don't replay history on load
     if (!S.sel && state.packages.length) S.sel = state.packages[0].id;
     render();
-    if (S.tab === 'maintenance') loadLong();
+    if (S.tab === 'maintenance') { loadLong(); loadMaint(false); }
   } catch (err) {
     $('#view').innerHTML = `<div class="empty"><b>Cannot reach the ColdTrust backend</b>${esc(err.message)}. Start it with <span class="mono">python -m backend</span>; this page retries every 10 s.</div>`;
   }
@@ -113,8 +113,18 @@ async function loadAll() {
 const debounce = (fn, ms) => { let t; return (...a) => { clearTimeout(t); t = setTimeout(() => fn(...a), ms); }; };
 const refreshState = debounce(async () => { try { D.state = await api('/api/state'); render(); } catch { /* next poll */ } }, 250);
 const refreshReadings = debounce(async () => {
-  try { D.readings = await api('/api/readings?minutes=120'); if (S.tab === 'maintenance') await loadLong(false); render(); } catch { /* next poll */ }
+  try { D.readings = await api('/api/readings?minutes=120'); if (S.tab === 'maintenance') { await loadLong(false); await loadMaint(false); } render(); } catch { /* next poll */ }
 }, 800);
+async function loadMaint(rerender = true) {
+  try { D.maint = await api('/api/maintenance?hours=' + S.mrange); } catch { /* keep the last report */ }
+  if (rerender) render();
+}
+async function summariseMaint() {
+  D.maintBusy = true; render();
+  try { D.maintAI = await post('/api/maintenance/summary', { hours: S.mrange }); }
+  catch (err) { D.maintAI = { source: 'error', note: 'That did not work: ' + err.message }; }
+  D.maintBusy = false; render();
+}
 async function loadLong(rerender = true) { try { D.readingsLong = await api('/api/readings?minutes=360'); if (rerender) render(); } catch { /* ignore */ } }
 
 function upsert(entry) {
@@ -296,9 +306,9 @@ function overlay() {
   let prog = null;
   if (v.lat !== undefined && v.lat !== null) prog = routeProgressLL(v.lat, v.lon).frac;
   const status = v.route_status || 'Idle', tone = /offline/i.test(status) ? 'crit' : /maint/i.test(status) ? 'warn' : /route/i.test(status) ? 'ok' : 'info';
-  const remain = prog === null ? '-' : `${(f.route.distance_mi * (1 - prog)).toFixed(1)} mi left`;
+  const remain = prog === null ? '-' : `${(f.route.distance_km * (1 - prog)).toFixed(0)} km left`;
   return `<div class="mapov"><div><div style="display:flex;justify-content:space-between;gap:8px;align-items:flex-start"><div><h4>${esc(f.id)}</h4><div class="mut" style="font-size:12.5px">${esc(v.zone || (v.authorised_stop ? 'Authorised stop' : 'Between stops'))}</div></div>${pill(tone, status)}</div>
-   <div class="gauges">${gauge({ v: v.speed_mph, min: 0, max: 90, unit: 'mph', label: 'Speed', color: 'var(--accent)', size: 120 })}${gauge({ v: v.fuel_gal, min: 0, max: 150, unit: 'gal', label: 'Fuel', color: 'var(--info)', size: 120 })}</div></div>
+   <div class="gauges">${gauge({ v: v.speed_kmh, min: 0, max: 140, unit: 'km/h', label: 'Speed', color: 'var(--accent)', size: 120 })}${gauge({ v: v.fuel_l, min: 0, max: 600, unit: 'L', label: 'Fuel', color: 'var(--info)', size: 120 })}</div></div>
    <div><div class="row"><span><b>${esc(f.driver_name)}</b><br><span class="mut mono" style="font-size:12px">${esc(f.driver_id)}</span></span><span class="mut" style="font-size:12px;text-align:right">${esc(f.route.from)} → ${esc(f.route.to)}<br>${prog === null ? 'No position yet' : `${Math.round(prog * 100)}% · ${remain}`}</span></div>
    ${prog === null ? '' : `<div class="bar" style="margin-top:10px"><i style="width:${Math.round(prog * 100)}%;background:var(--accent)"></i></div>`}</div>
    <div><button class="coll" data-act="alog"><span>Alerts and notifications (${al.length})</span><span>${S.alogOpen ? 'Hide' : 'Show'}</span></button>
@@ -360,7 +370,7 @@ function paramsText(e) {
   if (p.slope_c_per_min !== undefined && p.slope_c_per_min !== null) kv.push(`slope=${p.slope_c_per_min}C/min`);
   if (p.seq !== undefined) kv.push(`seq=${p.seq}`);
   if (p.n_samples !== undefined) kv.push(`n=${p.n_samples}`);
-  if (p.speed_mph !== undefined && p.speed_mph !== null) kv.push(`speed=${p.speed_mph}mph`);
+  if (p.speed_kmh !== undefined && p.speed_kmh !== null) kv.push(`speed=${p.speed_kmh}km/h`);
   if (p.zone) kv.push(`zone=${p.zone}`);
   if (p.person_in_frame) kv.push('person_in_frame=true');
   if (p.persons !== undefined && p.persons !== null) kv.push(`persons=${p.persons}`);
@@ -405,23 +415,23 @@ function slot(p) {
    <span style="display:flex;gap:5px;flex-wrap:wrap">${pill(TONE[p.status], SHORT[p.status], false)}</span></button>`;
 }
 function vCargo() {
-  const f = fleet(), c = counts(), pk = packages(), tw = pk.reduce((a, p) => a + p.weight_lbs, 0), tv = pk.reduce((a, p) => a + p.volume_ft3, 0);
-  const wp = tw / f.payload_capacity_lbs * 100, vp = tv / f.volume_capacity_ft3 * 100;
+  const f = fleet(), c = counts(), pk = packages(), tw = pk.reduce((a, p) => a + p.weight_kg, 0), tv = pk.reduce((a, p) => a + p.volume_m3, 0);
+  const wp = tw / f.payload_capacity_kg * 100, vp = tv / f.volume_capacity_m3 * 100;
   const shown = pk.filter(p => (S.filter === 'all' || p.status === S.filter) && matches(p)).sort((a, b) => a.loading_order - b.loading_order);
   const series = D.readings.slice(-720).map(r => ({ t: r.t, v: r.temp_c }));
   const capRow = (label, val, pct, tone) => `<div><div class="row" style="background:none;border:0;padding:0"><span class="mut">${label}</span><b class="tn">${val}</b></div><div class="bar" style="margin-top:6px"><i style="width:${Math.min(100, pct)}%;background:var(--${tone})"></i></div></div>`;
   return `<div class="g gcargo"><div class="g start">
     <div class="card"><div class="h"><h3>Cargo layout</h3>${pill(c.QUARANTINED ? 'crit' : c.UNDER_REVIEW ? 'warn' : 'ok', c.QUARANTINED ? `${c.QUARANTINED} quarantined` : c.UNDER_REVIEW ? `${c.UNDER_REVIEW} under review` : 'All normal')}<span class="grow"></span>${vp >= 95 ? '<span class="chip">Fully loaded</span>' : ''}</div>
      <div class="b"><div class="g g3" style="gap:16px">
-        ${capRow('Weight', `${fmt(tw)} / ${fmt(f.payload_capacity_lbs)} lbs`, wp, 'info')}
-        ${capRow('Volume', `${fmt(tv)} / ${fmt(f.volume_capacity_ft3)} ft³`, vp, vp >= 95 ? 'warn' : 'info')}
+        ${capRow('Weight', `${fmt(tw)} / ${fmt(f.payload_capacity_kg)} kg`, wp, 'info')}
+        ${capRow('Volume', `${tv.toFixed(1)} / ${f.volume_capacity_m3} m³`, vp, vp >= 95 ? 'warn' : 'info')}
         ${capRow('Cleared to deliver', `${c.NORMAL} / ${pk.length}`, pk.length ? c.NORMAL / pk.length * 100 : 0, c.QUARANTINED ? 'crit' : c.UNDER_REVIEW ? 'warn' : 'ok')}</div>
        <div class="truck" style="margin-top:16px"><div class="cab">CAB</div><div class="hold" aria-label="Cargo hold, front at left, rear door at right">${pk.slice().sort((a, b) => a.loading_order - b.loading_order).map(slot).join('')}</div></div>
        <div class="legend"><span><i style="background:var(--ok)"></i>Normal</span><span><i style="background:var(--warn)"></i>Under review</span><span><i style="background:var(--crit)"></i>Quarantined</span><span class="dim">Loading order 1 (front) to ${pk.length} (rear door)</span></div></div></div>
     <div class="g g3" style="gap:14px"><div style="grid-column:span 2" class="g">${climateCard()}</div><div class="card"><div class="h"><h3>Trend</h3><span class="grow"></span><span class="note">last 2 h</span></div><div class="b">${lineChart(series, { w: 300, h: 180, band: holdLimits() })}</div></div></div>
     ${cameraCard()}</div>
    <div class="card start"><div class="h"><h3>Packages</h3><span class="grow"></span>
-       <span class="chip">Items <b class="tn">${pk.length}</b></span><span class="chip">Weight <b class="tn">${fmt(tw)} lbs</b></span><span class="chip">Payload <b class="tn">${fmt(f.payload_capacity_lbs)} lbs</b></span></div>
+       <span class="chip">Items <b class="tn">${pk.length}</b></span><span class="chip">Weight <b class="tn">${fmt(tw)} kg</b></span><span class="chip">Payload <b class="tn">${fmt(f.payload_capacity_kg)} kg</b></span></div>
      <div class="b"><div class="filters" style="margin-bottom:10px">${[['all', 'All'], ['NORMAL', 'Normal'], ['UNDER_REVIEW', 'Review'], ['QUARANTINED', 'Quarantined']].map(([k, t]) => `<button class="${S.filter === k ? 'on' : ''}" data-act="filter" data-v="${k}" aria-pressed="${S.filter === k}">${t}${k === 'all' ? '' : ' ' + c[k]}</button>`).join('')}${S.q ? `<span class="chip">matching “${esc(S.q)}” <button data-act="clearq" aria-label="Clear search">✕</button></span>` : ''}</div>
      <div class="plist">${shown.length ? shown.map(pkCard).join('') : '<div class="empty">No packages match.</div>'}</div></div></div></div>`;
 }
@@ -429,7 +439,7 @@ function pkCard(p) {
   const open = S.sel === p.id;
   const head = `<div class="r"><span><b class="mono">${esc(p.id)}</b> <span class="mut">${esc(p.description)} ×${p.quantity}</span></span>${pill(PRIO[p.priority] || 'mut', p.priority, false)}</div>
     <div class="r"><span class="chips">${p.tags.map(t => `<span class="tag">${esc(t)}</span>`).join('')}${p.reassign_to ? `<span class="tag">→ ${esc(p.reassign_to)}</span>` : ''}</span>${pill(TONE[p.status], SHORT[p.status])}</div>
-    <div class="r mut" style="font-size:12.5px">${S.module === 'delivery' ? `<span>${esc(p.recipient || p.client)} · ${esc(p.destination)}</span>` : `<span class="tn">${fmt(p.weight_lbs)} lbs · ${p.volume_ft3} ft³ · load #${p.loading_order}</span>`}<span class="tn">risk ${p.risk_score}</span></div>`;
+    <div class="r mut" style="font-size:12.5px">${S.module === 'delivery' ? `<span>${esc(p.recipient || p.client)} · ${esc(p.destination)}</span>` : `<span class="tn">${fmt(p.weight_kg)} kg · ${p.volume_m3} m³ · load #${p.loading_order}</span>`}<span class="tn">risk ${p.risk_score}</span></div>`;
   return `<div class="pk ${open ? 'sel' : ''}"><button data-act="pick" data-v="${esc(p.id)}" style="text-align:left;display:grid;gap:7px;width:100%" aria-expanded="${open}">${head}</button>${open ? pkDetail(p) : ''}</div>`;
 }
 function pkDetail(p) {
@@ -441,7 +451,7 @@ function pkDetail(p) {
     : `<div class="okbox">${esc(p.instructions || `Keep within ${p.temp_min_c}–${p.temp_max_c} °C.`)}</div>`;
   return `<dl class="kvs"><div><dt>Client</dt><dd>${esc(p.client)}</dd></div><div><dt>Loading order</dt><dd>#${p.loading_order}</dd></div>
      <div><dt>Destination</dt><dd>${esc(p.destination)}</dd></div><div><dt>Temperature limits</dt><dd class="tn">${p.temp_min_c}–${p.temp_max_c} °C</dd></div>
-     <div><dt>Weight / volume</dt><dd class="tn">${fmt(p.weight_lbs)} lbs · ${p.volume_ft3} ft³</dd></div><div><dt>Excursion budget used</dt><dd class="tn">${out.toFixed(1)} of ${p.excursion_budget_min} min</dd></div></dl>
+     <div><dt>Weight / volume</dt><dd class="tn">${fmt(p.weight_kg)} kg · ${p.volume_m3} m³</dd></div><div><dt>Excursion budget used</dt><dd class="tn">${out.toFixed(1)} of ${p.excursion_budget_min} min</dd></div></dl>
      <div><div class="row" style="background:none;border:0;padding:0"><span class="mut">Risk score</span><b class="tn">${r} / 100</b></div><div class="bar" style="margin-top:5px"><i style="width:${r}%;background:${r >= 70 ? 'var(--crit)' : r >= 30 ? 'var(--warn)' : 'var(--ok)'}"></i></div></div>
      <div class="row"><span><span class="mut">Custody token</span> <span class="mono">${esc(p.custody_token.slice(0, 4))}…${esc(p.custody_token.slice(-2))}</span></span>${pill(p.token_valid ? 'ok' : 'crit', p.token_valid ? 'Valid' : 'Revoked')}<button class="btn sm" data-act="scan" data-v="${esc(p.custody_token)}">Simulate receiving scan</button></div>
      ${warn}
@@ -466,9 +476,42 @@ function recoveries(rows, thr) {
   }
   return out;
 }
+const MAINT_RANGES = [[6, '6 h'], [24, '24 h'], [168, '7 days']];
+const COOLING_TONE = { 'no sign of weakening': 'ok', 'possible weakening': 'warn', 'not enough data': 'info' };
+const URGENCY_TONE = { none: 'ok', monitor: 'info', 'service soon': 'warn' };
+function maintReview() {
+  const m = D.maint, ai = D.maintAI, u = D.state && D.state.llm_usage;
+  const seg = `<div class="seg" role="group" aria-label="Review period">${MAINT_RANGES.map(([h, t]) => `<button data-act="mrange" data-v="${h}" class="${S.mrange === h ? 'on' : ''}" aria-pressed="${S.mrange === h}">${t}</button>`).join('')}</div>`;
+  const head = `<div class="h"><h3>Maintenance review</h3><span class="grow"></span>${seg}</div>`;
+  if (!m) return `<div class="card" style="margin-bottom:14px">${head}<div class="b mut">Loading the review…</div></div>`;
+  const ov = m.overall;
+  if (!ov) return `<div class="card" style="margin-bottom:14px">${head}<div class="b mut">No sensor readings in this period yet.</div></div>`;
+  const num = (v, unit = '') => v === null || v === undefined ? '-' : v + unit;
+  const kpis = `<div class="g g4"><div class="card kpi"><div class="l">Time in range</div><div class="v tn">${num(ov.time_in_range_pct, '%')}</div><div>${pill(ov.time_in_range_pct >= 90 ? 'ok' : 'warn', ov.time_in_range_pct >= 90 ? 'Within 90% target' : 'Below 90% target', false)}</div></div>
+    <div class="card kpi"><div class="l">Peak temperature</div><div class="v tn">${num(ov.peak_c, ' °C')}</div><div class="note">${m.samples} readings</div></div>
+    <div class="card kpi"><div class="l">Door openings</div><div class="v tn">${ov.door_openings}</div><div class="note">${ov.not_recovered ? ov.not_recovered + ' never recovered' : 'all recovered'}</div></div>
+    <div class="card kpi"><div class="l">Average recovery</div><div class="v tn">${ov.avg_recovery_min === null ? '-' : ov.avg_recovery_min + ' min'}</div><div>${pill(ov.recovery_trend === 'slower' ? 'warn' : ov.recovery_trend === 'unknown' ? 'mut' : 'ok', ov.recovery_trend === 'unknown' ? 'Trend: not enough openings' : 'Trend: ' + ov.recovery_trend, false)}</div></div></div>`;
+  const days = m.per_day.length > 1 ? `<div class="list" style="margin-top:12px">${m.per_day.map(d => `<div class="row"><span class="mono">${esc(d.date)}</span><span class="mut tn">in range ${num(d.time_in_range_pct, '%')} · peak ${num(d.peak_c, ' °C')} · ${d.door_openings} opening${d.door_openings === 1 ? '' : 's'} · recovery ${d.avg_recovery_min === null ? '-' : d.avg_recovery_min + ' min'}</span></div>`).join('')}</div>` : '';
+  const ind = `<div class="list" style="margin-top:12px">${m.indicators.map(i => `<div class="row"><span><b>${esc(i.title)}</b><br><span class="mut">${esc(i.detail)}</span></span>${pill(i.tone === 'ok' ? 'ok' : i.tone === 'warn' ? 'warn' : 'info', i.tone === 'ok' ? 'Clear' : i.tone === 'warn' ? 'Watch' : 'Info')}</div>`).join('')}</div>`;
+  let aiBox = '';
+  if (ai) {
+    const sm = ai.summary;
+    aiBox = ai.source === 'error' ? `<div class="note" style="margin-top:10px">${esc(ai.note)}</div>` : `<div class="note" style="margin-top:12px;display:grid;gap:8px;padding:12px;border:1px solid var(--line2);border-radius:12px;background:var(--panel2);color:var(--fg)">
+      <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center"><span class="chip">${esc(ai.source === 'ai' ? ai.agent : 'Rule-based summary')}</span>${pill(COOLING_TONE[sm.cooling_unit] || 'info', 'Cooling unit: ' + sm.cooling_unit, false)}${pill(URGENCY_TONE[sm.urgency] || 'info', 'Urgency: ' + sm.urgency, false)}${ai.cached ? '<span class="mut" style="font-size:12px">same numbers as the last press, no new AI call</span>' : ''}</div>
+      <div>${esc(sm.assessment)}</div>
+      ${sm.evidence.length ? `<div class="mut" style="font-size:12.5px">Evidence: ${sm.evidence.map(esc).join(' · ')}</div>` : ''}
+      <ul style="margin:0;padding-left:18px">${sm.recommended_actions.map(a => `<li>${esc(a)}</li>`).join('')}</ul>
+      ${ai.note ? `<div class="mut" style="font-size:12.5px">${esc(ai.note)}</div>` : ''}
+      <div class="mut" style="font-size:12px">An early-warning indicator from the sensor history, not a prediction.</div></div>`;
+  }
+  const paused = u && u.paused ? ` · AI paused: ${esc(u.paused)}` : '';
+  const left = !D.state.llm ? 'AI agents are off, so you get the rule-based summary.' : u ? `Uses 1 of the ${u.daily_cap - u.used} free AI calls left today${paused}.` : '';
+  const btn = `<div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-top:12px"><button class="btn pri" data-act="maint-ai" ${D.maintBusy ? 'disabled' : ''}>${D.maintBusy ? 'Thinking…' : 'Summarise with AI'}</button><span class="note">Press it when you want a written review (for example once a week). ${left}</span></div>`;
+  return `<div class="card" style="margin-bottom:14px">${head}<div class="b">${kpis}${ind}${days}${btn}${aiBox}</div></div>`;
+}
 function vMaintenance() {
   const rows = D.readingsLong.length ? D.readingsLong : D.readings, [lo, hi] = holdLimits();
-  if (!rows.length) return `<div class="empty"><b>No sensor history yet</b>Indicators appear after the first device pings.</div>`;
+  if (!rows.length) return maintReview() + `<div class="empty"><b>No sensor history yet</b>Indicators appear after the first device pings.</div>`;
   const inRange = rows.filter(r => r.temp_c >= lo && r.temp_c <= hi).length / rows.length * 100;
   const peak = Math.max(...rows.map(r => r.temp_c));
   const t = lastTelemetry(), slope = t ? t.params.slope_c_per_min : null, cur = rows[rows.length - 1].temp_c;
@@ -485,7 +528,7 @@ function vMaintenance() {
   if (rising) ind.push(['warn', 'Recovery after door openings is getting slower', 'Service the refrigeration unit before the next long haul']);
   if (slope && slope > 0.2) ind.push(['warn', `Hold warming at +${slope} °C/min`, proj ? `About ${Math.round(proj)} min to ${hi} °C if nothing changes` : 'Already above the limit']);
   if (ind.length === 1 && !rising) ind.push(['ok', 'No sign of weakening cooling', 'Keep monitoring']);
-  return `<div class="g g4"><div class="card kpi"><div class="l">Time in range (${hours.toFixed(1)} h)</div><div class="v tn">${inRange.toFixed(1)}%</div><div>${pill(inRange >= 90 ? 'ok' : 'warn', inRange >= 90 ? 'Within 90% target' : 'Below 90% target', false)}</div></div>
+  return maintReview() + `<div class="g g4"><div class="card kpi"><div class="l">Time in range (${hours.toFixed(1)} h)</div><div class="v tn">${inRange.toFixed(1)}%</div><div>${pill(inRange >= 90 ? 'ok' : 'warn', inRange >= 90 ? 'Within 90% target' : 'Below 90% target', false)}</div></div>
     <div class="card kpi"><div class="l">Peak temperature</div><div class="v tn">${peak.toFixed(1)} °C</div><div>${pill(peak > hi ? 'crit' : 'ok', peak > hi ? `above ${hi} °C limit` : 'within limit', false)}</div></div>
     <div class="card kpi"><div class="l">Current trend</div><div class="v tn">${slope == null ? '-' : (slope > 0 ? '+' : '') + slope + ' °C/min'}</div><div>${pill(slope > 0.2 ? 'warn' : 'ok', slope > 0.2 ? 'Warming' : 'Stable', false)}</div></div>
     <div class="card kpi"><div class="l">Time to ${hi} °C at this trend</div><div class="v tn">${proj === null ? '-' : '≈ ' + Math.round(proj) + ' min'}</div><div class="note">Linear estimate, not a prediction</div></div></div>
@@ -529,12 +572,12 @@ function vEvidence() {
 
 /* Speed: the node has no GPS, so the demo sets speed here; with a GPS feed this shows the real value. */
 function speedCard() {
-  const v = vehicle(), sp = v.speed_mph ?? 0, onRoute = v.route_status === 'En route';
-  const risk = onRoute && sp < 1 && !v.authorised_stop;
+  const v = vehicle(), sp = v.speed_kmh ?? 0, onRoute = v.route_status === 'En route';
+  const risk = onRoute && sp < 2 && !v.authorised_stop;
   return `<div class="card"><div class="h"><h3>Vehicle speed</h3><span class="grow"></span>${pill(onRoute ? (risk ? 'warn' : 'ok') : 'mut', onRoute ? (risk ? 'Stopped on route' : 'On route') : (v.route_status || 'Route not active'), !!onRoute)}</div>
-   <div class="b"><div style="display:grid;grid-template-columns:150px 1fr;gap:14px;align-items:center">${gauge({ v: sp, min: 0, max: 90, unit: 'mph', label: 'Speed', color: risk ? 'var(--warn)' : 'var(--accent)' })}
-     <div class="list"><div class="mut" style="font-size:12.5px">Set speed (demo, no GPS on the node)</div>
-       <div style="display:flex;gap:6px;flex-wrap:wrap">${[0, 30, 60].map(x => `<button class="btn sm ${Math.round(sp) === x ? 'pri' : ''}" data-act="speed" data-v="${x}">${x === 0 ? 'Stop' : x + ' mph'}</button>`).join('')}</div>
+   <div class="b"><div style="display:grid;grid-template-columns:150px 1fr;gap:14px;align-items:center">${gauge({ v: sp, min: 0, max: 140, unit: 'km/h', label: 'Speed', color: risk ? 'var(--warn)' : 'var(--accent)' })}
+     <div class="list"><div class="mut" style="font-size:12.5px">Set speed (demo, no GPS on the node). Any speed above 0 activates the route.</div>
+       <div style="display:flex;gap:6px;flex-wrap:wrap">${[0, 50, 90].map(x => `<button class="btn sm ${Math.round(sp) === x ? 'pri' : ''}" data-act="speed" data-v="${x}">${x === 0 ? 'Stop' : x + ' km/h'}</button>`).join('')}</div>
        ${onRoute ? '' : '<button class="btn sm" data-act="vaction" data-v="activate">Activate Route</button>'}</div></div>
    <div class="note" style="margin-top:8px">Rule: if the hold lights up while the truck is stopped on an active route (outside a depot or dock), the agent treats it as possible theft.</div></div></div>`;
 }
@@ -734,12 +777,14 @@ document.addEventListener('click', e => {
   if (!e.target.closest('.relw') && S.menu) { S.menu = null; renderChrome(); }
   if (!el) return;
   const a = el.dataset.act, v = el.dataset.v;
-  if (a === 'tab') { S.tab = v; S.menu = null; store.set('tab', v); if (v === 'maintenance') loadLong(); render(); window.scrollTo({ top: 0 }); }
+  if (a === 'tab') { S.tab = v; S.menu = null; store.set('tab', v); if (v === 'maintenance') { loadLong(); loadMaint(); } render(); window.scrollTo({ top: 0 }); }
   else if (a === 'pick') {
     S.sel = S.sel === v && S.tab === 'cargo' && !el.classList.contains('slot') ? null : v; S.reassign = false; S.tab = 'cargo'; store.set('tab', 'cargo'); $('#qres').hidden = true; render();
     const card = $('.pk.sel'); if (card) card.scrollIntoView({ block: 'nearest', behavior: matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth' });
   }
   else if (a === 'filter') { S.filter = v; renderView(); }
+  else if (a === 'mrange') { S.mrange = +v; store.set('mrange', S.mrange); D.maint = null; D.maintAI = null; render(); loadMaint(); }
+  else if (a === 'maint-ai') { if (!D.maintBusy) summariseMaint(); }
   else if (a === 'clearq') { S.q = ''; $('#q').value = ''; renderView(); }
   else if (a === 'module') { S.module = v; store.set('module', v); render(); }
   else if (a === 'mt') { S[v] = !S[v]; renderView(); }
@@ -749,7 +794,7 @@ document.addEventListener('click', e => {
   else if (a === 'theme') { const r = document.documentElement, dark = matchMedia('(prefers-color-scheme: dark)').matches; const curDark = r.dataset.theme ? r.dataset.theme === 'dark' : dark; r.dataset.theme = curDark ? 'light' : 'dark'; store.set('theme', r.dataset.theme); S.menu = null; render(); }
   else if (a === 'ack') act(() => post(`/api/audit/${v}/ack`, { by: S.me }), 'Acknowledged', 'Recorded in the audit log.');
   else if (a === 'inc-open') { S.tab = 'evidence'; S.menu = null; render(); }
-  else if (a === 'speed') act(() => post('/api/vehicle', { speed_mph: +v }), null);
+  else if (a === 'speed') act(() => post('/api/vehicle', { speed_kmh: +v }), null);
   else if (a === 'vaction') act(() => post('/api/vehicle/action', { action: v, by: S.me }), 'Vehicle updated', { maintenance: 'Maintenance requested.', offline: 'Vehicle marked offline.', activate: 'Route active.' }[v]);
   else if (a === 'scan') act(async () => { const r = await api(`/api/custody/${encodeURIComponent(v)}`); toast(r.valid ? 'ok' : 'crit', r.valid ? 'Scan accepted' : 'Scan rejected', r.valid ? `${r.package} can be handed over.` : `${r.package || ''} ${r.reason}`); });
   else if (a === 'reassign') { S.reassign = !S.reassign; renderView(); }

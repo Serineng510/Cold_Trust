@@ -30,8 +30,8 @@ class IngestIn(BaseModel):
 class VehicleIn(BaseModel):
     lat: float | None = None
     lon: float | None = None
-    speed_mph: float | None = Field(default=None, ge=0, le=200)
-    fuel_gal: float | None = Field(default=None, ge=0)
+    speed_kmh: float | None = Field(default=None, ge=0, le=320)
+    fuel_l: float | None = Field(default=None, ge=0)
     heading: str | None = None
     route_status: str | None = None
     zone: str | None = Field(default=None, description="Geofence name, or null when outside any")
@@ -87,3 +87,7 @@ class CameraObservationIn(BaseModel):
                                   description="Pose cues such as 'reaching', 'crouching', 'lingering'")
     description: str = Field(default="", max_length=300)
     source: str = Field(default="camera", max_length=20)
+
+
+class MaintenanceIn(BaseModel):
+    hours: int = Field(default=168, ge=1, le=168, description="How much history to review: 6, 24 or 168 (7 days)")

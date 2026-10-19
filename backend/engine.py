@@ -28,6 +28,8 @@ TAMPER_RISK_FLOOR = {"THEFT_SUSPECTED": 90, "SPOOF_SUSPECTED": 50, "SUSPICIOUS_P
 PERSON_FRESH_S = 120  # a camera sighting older than this no longer counts
 DEMO_DEFAULTS = {"mock": False, "temp_c": 4.0, "light_mock": False, "light_pct": 0.0}
 DEMO_FRESH_S = 600
+MOVING_KMH = 8       # above this the truck counts as moving, and an authorised stop needs a speed below it
+STOPPED_KMH = 2      # below this the truck is standing still
 HISTORY_WINDOW_S = 6 * 3600
 REMINDER_S = 600  # unresolved problems are re-sent at most every 10 min
 DATA_TRUST_CODES = {"LIGHT_ZERO_VARIANCE", "DOOR_OPEN_NO_THERMAL_RESPONSE", "SENSOR_DISAGREEMENT"}
@@ -85,11 +87,11 @@ class Engine:
         # ---- context
         vehicle = self.store.kv_get("vehicle", {})
         cam = self.store.kv_get("camera", {})
-        moving = (vehicle.get("speed_mph") or 0) > 5
+        moving = (vehicle.get("speed_kmh") or 0) > MOVING_KMH
         authorised = bool(vehicle.get("authorised_stop"))
         person_recent = bool(cam.get("person_present")) and (now - cam.get("ts", 0)) <= 120
         # After "Activate Route" the truck should be driving; standing still with the hold lit is suspicious.
-        stopped_on_route = vehicle.get("route_status") == "En route" and (vehicle.get("speed_mph") or 0) < 1
+        stopped_on_route = vehicle.get("route_status") == "En route" and (vehicle.get("speed_kmh") or 0) < STOPPED_KMH
 
         # ---- features
         slope = rules.slope_c_per_min(history, cfg.rate_window_s)
@@ -140,8 +142,12 @@ class Engine:
 
         codes = {f.code for f in findings}
         cooling = step <= -cfg.step_change_c or any(latest.temp_c < pk["temp_min_c"] for pk in violating)
+        # Door open at an authorised stop warms the hold: that is handling, not an alarm, for the first few minutes.
+        # It never excuses a COOLING hold (an open door does not cool), and a long excursion becomes an alert.
+        excursion_s = rules.out_of_limits_run_s(history, [(pk["temp_min_c"], pk["temp_max_c"]) for pk in packages])
+        door_explains_thermal = authorised and not cooling and excursion_s < cfg.handling_grace_s
         scenario = self._classify(codes, authorised=authorised, person_recent=person_recent, cooling=cooling,
-                                  stopped_on_route=stopped_on_route)
+                                  stopped_on_route=stopped_on_route, door_explains_thermal=door_explains_thermal)
 
         # ---- per-package assessment and enforcement
         actions: list[str] = []
@@ -202,7 +208,7 @@ class Engine:
                 "light_pct": round(latest.light_pct, 1),
                 "slope_c_per_min": None if slope is None else round(slope, 2),
                 "step_c": round(step, 1), "bright_s": round(bright_s),
-                "speed_mph": vehicle.get("speed_mph"), "zone": vehicle.get("zone"),
+                "speed_kmh": vehicle.get("speed_kmh"), "zone": vehicle.get("zone"),
                 "lat": vehicle.get("lat"), "lon": vehicle.get("lon"), "route_status": vehicle.get("route_status"),
                 "person_in_frame": person_recent, "simulated": bool(p.demo),
                 "mocked": list((p.demo_sensors or ["temp"]) if p.demo else []),
@@ -240,7 +246,7 @@ class Engine:
             fence = fence_at(data["lat"], data["lon"])
             cur["zone"] = fence["name"] if fence else None
             if data.get("authorised_stop") is None:
-                cur["authorised_stop"] = bool(fence and fence["authorised"] and (cur.get("speed_mph") or 0) < 5)
+                cur["authorised_stop"] = bool(fence and fence["authorised"] and (cur.get("speed_kmh") or 0) < MOVING_KMH)
         cur["updated_at"] = self.now()
         self.store.kv_set("vehicle", cur)
         return cur
@@ -272,7 +278,7 @@ class Engine:
 
         vehicle = self.store.kv_get("vehicle", {})
         where = vehicle.get("zone") or "between stops"
-        moving = (vehicle.get("speed_mph") or 0) > 5
+        moving = (vehicle.get("speed_kmh") or 0) > MOVING_KMH
         n = int(obs.get("persons") or 1)
         who = f"{n} person{'s' if n > 1 else ''} in the cargo hold" + (f" ({', '.join(behaviours)})" if behaviours else "")
         if vehicle.get("authorised_stop"):
@@ -292,7 +298,7 @@ class Engine:
             scenario, severity, target = "SUSPICIOUS_PERSON", "critical", "UNDER_REVIEW"
             reasoning = f"{who} {context}, outside an authorised stop. Nobody should be in the hold here."
         return self._camera_entry(now, scenario, severity, reasoning, obs, scenario_key=scenario, target=target,
-                                  extra={"zone": vehicle.get("zone"), "speed_mph": vehicle.get("speed_mph"), "lit": lit,
+                                  extra={"zone": vehicle.get("zone"), "speed_kmh": vehicle.get("speed_kmh"), "lit": lit,
                                          "lat": vehicle.get("lat"), "lon": vehicle.get("lon")})
 
     def _camera_entry(self, now: float, kind: str, severity: str, reasoning: str, obs: dict[str, Any], *,
@@ -401,7 +407,7 @@ class Engine:
                                               f"{device} is reporting again; buffered readings were uploaded", [], ""))
         veh = self.store.kv_get("vehicle", {})
         updated = veh.get("updated_at")
-        en_route = (veh.get("speed_mph") or 0) > 0 or not veh.get("authorised_stop")
+        en_route = (veh.get("speed_kmh") or 0) > 0 or not veh.get("authorised_stop")
         if updated is not None and en_route:
             stale = now - updated > cfg.gps_stale_s
             if stale and not state["gps_stale"]:
@@ -504,8 +510,8 @@ class Engine:
             "packages": packages,
             "totals": {
                 "items": len(packages),
-                "weight_lbs": sum(p["weight_lbs"] for p in packages),
-                "volume_ft3": sum(p["volume_ft3"] for p in packages),
+                "weight_kg": sum(p["weight_kg"] for p in packages),
+                "volume_m3": round(sum(p["volume_m3"] for p in packages), 1),
                 "status_counts": counts,
             },
         }
@@ -532,7 +538,7 @@ class Engine:
 
     @staticmethod
     def _classify(codes: set[str], *, authorised: bool, person_recent: bool, cooling: bool,
-                  stopped_on_route: bool = False) -> str:
+                  stopped_on_route: bool = False, door_explains_thermal: bool = False) -> str:
         light = "LIGHT_BRIGHT" in codes
         thermal = bool(codes & {"TEMP_THRESHOLD", "TEMP_RATE", "TEMP_STEP"})
         spoof = "DOOR_OPEN_NO_THERMAL_RESPONSE" in codes
@@ -542,8 +548,8 @@ class Engine:
             return "THEFT_SUSPECTED"   # door opened while the truck stands still mid-route
         if spoof:
             return "SPOOF_SUSPECTED"
-        if light and authorised and not thermal:
-            return "AUTHORISED_HANDLING"   # harmless only while nothing else is wrong; a temperature alarm still wins
+        if light and authorised and (not thermal or door_explains_thermal):
+            return "AUTHORISED_HANDLING"   # a temperature problem only wins once it outlasts the grace period, or if cooling
         if light and not authorised:
             return "DOOR_AJAR"
         if thermal:
@@ -597,7 +603,10 @@ class Engine:
             "THEFT_SUSPECTED": "Bright light and a person in the hold camera outside an authorised stop: "
                                "treated as unauthorised access.",
             "SPOOF_SUSPECTED": "Telemetry contradicts itself, so the sensor data cannot be trusted.",
-            "AUTHORISED_HANDLING": "Door/light activity at an authorised stop; logged, no action required.",
+            "AUTHORISED_HANDLING": ("Door/light activity at an authorised stop while the temperature is off: expected "
+                                    "with the door open. An alert follows if it lasts, or if the hold starts cooling."
+                                    if any(f.code.startswith("TEMP_") for f in findings) else
+                                    "Door/light activity at an authorised stop; logged, no action required."),
             "DOOR_AJAR": "Cargo light detected outside an authorised stop; the rear door may be open.",
             "THERMAL_EXCURSION": "Hold temperature is outside, or heading out of, package limits.",
             "FREEZE_RISK": "Hold temperature is falling below package limits; freeze damage possible.",
@@ -605,7 +614,7 @@ class Engine:
             "NORMAL": "Within limits.",
         }[scenario]
         if scenario == "THEFT_SUSPECTED" and not person:
-            lead = ("Cargo light came on while the truck was stopped (0 mph) on an active route, outside an "
+            lead = ("Cargo light came on while the truck was stopped (0 km/h) on an active route, outside an "
                     "authorised stop: treated as possible theft.")
         return f"{lead} {detail}."
 

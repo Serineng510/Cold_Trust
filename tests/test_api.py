@@ -47,7 +47,7 @@ def test_ingest_then_audit_and_replay_block(client):
 def test_quarantine_revokes_custody_token_and_override_reissues(client):
     token = client.get("/api/state").json()["packages"][0]["custody_token"]
     assert client.get(f"/api/custody/{token}").json()["valid"] is True
-    client.post("/api/vehicle", json={"speed_mph": 60, "authorised_stop": False})
+    client.post("/api/vehicle", json={"speed_kmh": 60, "authorised_stop": False})
     base = 1_800_000_000
     client.post("/api/telemetry", json=build_payload(1, base + 60, [sample(base + i * 5, 3, 20) for i in range(1, 13)]))
     client.post("/api/camera/observation", json={"person_present": True, "description": "person at door"})
@@ -107,7 +107,7 @@ def test_ack_approve_reassign_and_vehicle_actions(client):
 
 
 def test_activate_route_leaves_the_depot_and_evidence_records_location(client):
-    client.post("/api/vehicle", json={"lat": 33.05, "lon": -96.10, "speed_mph": 0})
+    client.post("/api/vehicle", json={"lat": 33.05, "lon": -96.10, "speed_kmh": 0})
     v = client.post("/api/vehicle/action", json={"action": "activate", "by": "Lisa"}).json()["vehicle"]
     assert v["route_status"] == "En route" and v["authorised_stop"] is False and v["zone"] is None
     import base64
@@ -238,3 +238,38 @@ def test_saturated_adc_reading_of_1024_is_accepted(client):
     p = build_payload(1, t0 + 60, [{"t": t0 + 60, "temp_c": 3, "hum": 50, "light": 1024}])
     r = client.post("/api/telemetry", json=p)
     assert r.status_code == 200 and r.json()["accepted"] is True
+
+
+
+def test_any_speed_activates_the_route(client):
+    """Pressing 50 or 90 km/h on the dashboard means the vehicle is driving: same as Activate Route."""
+    assert client.get("/api/state").json()["vehicle"]["route_status"] == "Idle"
+    v = client.post("/api/vehicle", json={"speed_kmh": 50}).json()
+    assert v["route_status"] == "En route" and v["speed_kmh"] == 50
+    assert v["authorised_stop"] is False and v["zone"] is None          # it has left the depot
+    entries = [e for e in client.get("/api/audit").json() if e["kind"] == "VEHICLE_ACTION"]
+    assert entries and "Route activated" in entries[-1]["reasoning"]
+
+
+def test_stopping_does_not_deactivate_the_route(client):
+    client.post("/api/vehicle", json={"speed_kmh": 90})
+    v = client.post("/api/vehicle", json={"speed_kmh": 0}).json()
+    assert v["route_status"] == "En route" and v["speed_kmh"] == 0     # stopped ON an active route (the theft rule)
+
+
+def test_speed_does_not_override_offline_or_maintenance(client):
+    client.post("/api/vehicle/action", json={"action": "offline", "by": "tester"})
+    assert client.post("/api/vehicle", json={"speed_kmh": 60}).json()["route_status"] == "Offline"
+
+
+def test_speed_zero_alone_does_not_activate(client):
+    assert client.post("/api/vehicle", json={"speed_kmh": 0}).json()["route_status"] == "Idle"
+
+
+def test_light_after_pressing_a_speed_is_a_door_ajar_not_handling(client):
+    """The reported bug: with the speed set, the vehicle must count as active and away from the depot."""
+    client.post("/api/vehicle", json={"speed_kmh": 90})
+    base = 1_800_000_000
+    p = build_payload(1, base + 30, [{"t": base + i * 5, "temp_c": 3, "hum": 50, "light": 700 + i % 3} for i in range(1, 7)],
+                      "EVENT", "LIGHT")
+    assert client.post("/api/telemetry", json=p).json()["entry"]["scenario"] == "DOOR_AJAR"

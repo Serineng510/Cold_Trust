@@ -1,0 +1,5 @@
+{
+  // Commit with the message box in the Source Control panel. Without this, clicking Commit with an empty box opens a
+  // COMMIT_EDITMSG tab and git waits for it for ever, so Source Control seems to be "syncing" and stuck.
+  "git.useEditorAsCommitInput": false
+}

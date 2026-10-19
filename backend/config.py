@@ -55,6 +55,8 @@ class Settings:
     light_bright_pct: float = _float("COLDTRUST_LIGHT_PCT", 30)
     ambient_c: float = _float("COLDTRUST_AMBIENT_C", 31)  # outside air, for contradiction checks
     door_open_contradiction_s: float = _float("COLDTRUST_DOOR_CONTRA_S", 300)
+    # At an authorised stop an open door is expected to warm the hold; it only becomes an alert after this long outside limits
+    handling_grace_s: float = _float("COLDTRUST_HANDLING_GRACE_S", 600)
     zero_variance_min_samples: int = int(_float("COLDTRUST_ZV_MIN", 20))
 
     temp_cross_check_c: float = _float("COLDTRUST_TEMP_CROSSCHECK_C", 3.0)  # max gap between the two thermometers

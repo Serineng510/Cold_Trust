@@ -7,7 +7,7 @@ from __future__ import annotations
 import secrets
 from typing import Any
 
-from .route_data import ROUTE, ROUTE_DISTANCE_MI, ROUTE_DURATION_MIN, ROUTE_SOURCE  # noqa: F401  (road geometry from OSRM)
+from .route_data import ROUTE, ROUTE_DISTANCE_KM, ROUTE_DURATION_MIN, ROUTE_SOURCE  # noqa: F401  (road geometry from OSRM)
 from .store import Store
 
 VEHICLE: dict[str, Any] = {
@@ -16,25 +16,25 @@ VEHICLE: dict[str, Any] = {
     "driver_name": "Marcus Lee",
     "driver_id": "DRV-20418",
     "device_id": "CC-001",
-    "route": {"from": "Shah Alam, Selangor", "to": "Johor Bahru, Johor", "distance_mi": ROUTE_DISTANCE_MI,
+    "route": {"from": "Shah Alam, Selangor", "to": "Johor Bahru, Johor", "distance_km": ROUTE_DISTANCE_KM,
               "duration_min": ROUTE_DURATION_MIN, "source": ROUTE_SOURCE},
-    "payload_capacity_lbs": 44000,
-    "volume_capacity_ft3": 2400,
+    "payload_capacity_kg": 20000,
+    "volume_capacity_m3": 68,
     "hold_limits_c": [2.0, 8.0],
 }
 
-# id, description, qty, lo, hi, budget_min, priority, weight_lbs, volume_ft3, tags, client, destination, order
+# id, description, qty, lo, hi, budget_min, priority, weight_kg, volume_m3, tags, client, destination, order
 _PACKAGES = [
-    ("SHP-8841", "Vaccine vials", 200, 2, 8, 30, "Critical", 1800, 120, ["Fragile", "Cold chain"], "Mercy Health Network", "Johor Bahru, Johor", 1),
-    ("SHP-4574", "Insulin pens", 24, 2, 8, 45, "High", 4200, 320, ["Fragile", "Cold chain"], "TechFlow Pharmacy", "Johor Bahru, Johor", 4),
-    ("SHP-9856", "Biologic samples", 12, 2, 8, 20, "Critical", 2100, 180, ["Fragile", "Cold chain"], "Delta Research Lab", "Seremban, Negeri Sembilan", 3),
-    ("SHP-8578", "Blood plasma bags", 12, 2, 6, 15, "Critical", 2600, 200, ["Cold chain"], "St. Luke's Hospital", "Johor Bahru, Johor", 2),
-    ("SHP-2364", "Fresh salmon fillets", 80, 0, 4, 60, "Normal", 3600, 260, ["Perishable"], "Harbor Foods", "Melaka, Melaka", 6),
-    ("SHP-7841", "Yoghurt crates", 120, 2, 6, 90, "Normal", 4800, 340, ["Perishable"], "Green Valley Dairy", "Melaka, Melaka", 7),
-    ("SHP-1248", "Fresh berries", 60, 1, 7, 120, "Low", 2400, 250, ["Perishable", "Fragile"], "FreshMart", "Johor Bahru, Johor", 5),
-    ("SHP-8978", "Cut flowers", 40, 2, 10, 240, "Low", 1500, 300, ["Fragile"], "Bloom & Co", "Seremban, Negeri Sembilan", 8),
-    ("SHP-7801", "Sliced deli meats", 50, 0, 5, 60, "Normal", 3000, 220, ["Perishable"], "Metro Deli", "Melaka, Melaka", 9),
-    ("SHP-5678", "Ready meals", 90, 0, 5, 90, "High", 2700, 200, ["Perishable"], "CityEats", "Johor Bahru, Johor", 10),
+    ("SHP-8841", "Vaccine vials", 200, 2, 8, 30, "Critical", 820, 3.4, ["Fragile", "Cold chain"], "Mercy Health Network", "Johor Bahru, Johor", 1),
+    ("SHP-4574", "Insulin pens", 24, 2, 8, 45, "High", 1900, 9.1, ["Fragile", "Cold chain"], "TechFlow Pharmacy", "Johor Bahru, Johor", 4),
+    ("SHP-9856", "Biologic samples", 12, 2, 8, 20, "Critical", 950, 5.1, ["Fragile", "Cold chain"], "Delta Research Lab", "Seremban, Negeri Sembilan", 3),
+    ("SHP-8578", "Blood plasma bags", 12, 2, 6, 15, "Critical", 1180, 5.7, ["Cold chain"], "St. Luke's Hospital", "Johor Bahru, Johor", 2),
+    ("SHP-2364", "Fresh salmon fillets", 80, 0, 4, 60, "Normal", 1630, 7.4, ["Perishable"], "Harbor Foods", "Melaka, Melaka", 6),
+    ("SHP-7841", "Yoghurt crates", 120, 2, 6, 90, "Normal", 2180, 9.6, ["Perishable"], "Green Valley Dairy", "Melaka, Melaka", 7),
+    ("SHP-1248", "Fresh berries", 60, 1, 7, 120, "Low", 1090, 7.1, ["Perishable", "Fragile"], "FreshMart", "Johor Bahru, Johor", 5),
+    ("SHP-8978", "Cut flowers", 40, 2, 10, 240, "Low", 680, 8.5, ["Fragile"], "Bloom & Co", "Seremban, Negeri Sembilan", 8),
+    ("SHP-7801", "Sliced deli meats", 50, 0, 5, 60, "Normal", 1360, 6.2, ["Perishable"], "Metro Deli", "Melaka, Melaka", 9),
+    ("SHP-5678", "Ready meals", 90, 0, 5, 90, "High", 1220, 5.7, ["Perishable"], "CityEats", "Johor Bahru, Johor", 10),
 ]
 
 GEOFENCES = [
@@ -69,19 +69,36 @@ def location_gln(name: str) -> str:
     return gln(idx + 1)
 
 
+def migrate_units(store: Store) -> None:
+    """Databases made before the metric change hold pounds, cubic feet, mph and gallons: convert them once."""
+    for pk in store.list_packages():
+        if "weight_lbs" in pk:
+            pk["weight_kg"] = round(pk.pop("weight_lbs") * 0.45359237 / 10) * 10
+            pk["volume_m3"] = round(pk.pop("volume_ft3") * 0.0283168, 1)
+            store.upsert_package(pk)
+    veh = store.kv_get("vehicle")
+    if veh and ("speed_mph" in veh or "fuel_gal" in veh):
+        if "speed_mph" in veh:
+            veh["speed_kmh"] = round(veh.pop("speed_mph") * 1.609344, 1)
+        if "fuel_gal" in veh:
+            veh["fuel_l"] = round(veh.pop("fuel_gal") * 3.78541, 1)
+        store.kv_set("vehicle", veh)
+
+
 def seed(store: Store, force: bool = False) -> None:
+    migrate_units(store)
     if store.list_packages() and not force:
         return
     for (pid, desc, qty, lo, hi, budget, prio, wt, vol, tags, client, dest, order) in _PACKAGES:
         store.upsert_package({
             "id": pid, "description": desc, "quantity": qty,
             "temp_min_c": lo, "temp_max_c": hi, "excursion_budget_min": budget,
-            "priority": prio, "weight_lbs": wt, "volume_ft3": vol, "tags": tags,
+            "priority": prio, "weight_kg": wt, "volume_m3": vol, "tags": tags,
             "client": client, "destination": dest, "loading_order": order,
             "recipient": client,
             "status": "NORMAL", "risk_score": 0, "excursion_min": 0.0,
             "custody_token": secrets.token_hex(8), "token_valid": True,
             "instructions": "Keep within limits. Do not accept if QUARANTINED.",
         })
-    store.kv_set("vehicle", {"speed_mph": 0, "fuel_gal": 62.0, "route_status": "Idle", "zone": "Shah Alam Depot",
+    store.kv_set("vehicle", {"speed_kmh": 0, "fuel_l": 235.0, "route_status": "Idle", "zone": "Shah Alam Depot",
                              "authorised_stop": True, "lat": 3.0738, "lon": 101.5183, "heading": "SE"})

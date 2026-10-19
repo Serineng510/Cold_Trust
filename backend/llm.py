@@ -21,6 +21,7 @@ import os
 import re
 import threading
 import time
+from contextlib import contextmanager
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
@@ -69,8 +70,9 @@ class QuotaGuard:
             data = json.loads(self.path.read_text(encoding="utf-8"))
         except (OSError, ValueError):
             data = {}
-        if data.get("day") != self._day():
-            data = {"day": self._day(), "counts": {}}
+        if data.get("day") != self._day():  # new day: counts restart, the minute window and any cool-down carry on
+            data = {"day": self._day(), "counts": {}, "recent": data.get("recent", []), "cool_until": data.get("cool_until", 0)}
+        data.setdefault("counts", {})
         return data
 
     def _save(self, data: dict[str, Any]) -> None:
@@ -80,34 +82,70 @@ class QuotaGuard:
         except OSError as exc:  # unwritable file: keep counting in memory only
             log.warning("cannot save Gemini usage count: %s", exc)
 
+    @contextmanager
+    def _file_lock(self):
+        """Several programs can run at once (server, key check, scripts): they all share this file, one at a time."""
+        lock = self.path.with_suffix(".lock")
+        held = False
+        for _ in range(100):  # wait up to about 2 s
+            try:
+                self.path.parent.mkdir(parents=True, exist_ok=True)
+                os.close(os.open(lock, os.O_CREAT | os.O_EXCL | os.O_WRONLY))
+                held = True
+                break
+            except FileExistsError:
+                try:
+                    if time.time() - lock.stat().st_mtime > 5:  # left behind by a crashed program
+                        lock.unlink()
+                        continue
+                except OSError:
+                    pass
+                time.sleep(0.02)
+            except OSError:
+                break
+        try:
+            yield
+        finally:
+            if held:
+                try:
+                    lock.unlink()
+                except OSError:
+                    pass
+
     def used_today(self, model: str) -> int:
         with self._lock:
             return int(self._load().get("counts", {}).get(model, 0))
 
     def reserve(self, model: str, rpm_cap: int, rpd_cap: int) -> bool:
-        with self._lock:
+        with self._lock, self._file_lock():
             now = self.clock()
-            if now < self._cool_until:
-                self.blocked_reason = f"cooling down after a 429 for {int(self._cool_until - now)} more s"
+            data = self._load()
+            cool = max(self._cool_until, float(data.get("cool_until", 0)))
+            if now < cool:
+                self.blocked_reason = f"cooling down after a 429 for {int(cool - now)} more s"
                 return False
-            self._recent = [t for t in self._recent if now - t < 60]
-            if len(self._recent) >= rpm_cap:
+            recent = sorted({t for t in [*data.get("recent", []), *self._recent] if 0 <= now - t < 60})
+            if len(recent) >= rpm_cap:
                 self.blocked_reason = f"per-minute cap {rpm_cap} reached"
                 return False
-            data = self._load()
             used = int(data["counts"].get(model, 0))
             if used >= rpd_cap:
                 self.blocked_reason = f"daily cap {rpd_cap} reached for {model}"
                 return False
-            self._recent.append(now)
+            recent.append(now)
+            self._recent = recent
+            data["recent"] = recent
             data["counts"][model] = used + 1
             self._save(data)
             self.blocked_reason = ""
             return True
 
     def cool_down(self, seconds: float) -> None:
-        with self._lock:
+        with self._lock, self._file_lock():
             self._cool_until = max(self._cool_until, self.clock() + seconds)
+            data = self._load()
+            data["cool_until"] = max(float(data.get("cool_until", 0)), self._cool_until)  # every program pauses, not just this one
+            self._save(data)
 
 
 class QuotaExhausted(Exception):
@@ -181,6 +219,29 @@ def agent_for(kind: str | None) -> str:
     """Thermal/incident kinds go to their specialist; everything else (data trust, watchdog, rejects) to Seal."""
     return AGENT_FOR_KIND.get(kind or "", "seal")
 
+
+MAINT_COOLING = ("no sign of weakening", "possible weakening", "not enough data")
+MAINT_URGENCY = ("none", "monitor", "service soon")
+MAINT_SCHEMA = {
+    "type": "object",
+    "additionalProperties": False,
+    "required": ["assessment", "cooling_unit", "urgency", "evidence", "recommended_actions"],
+    "properties": {
+        "assessment": {"type": "string", "description": "2-3 sentences for a fleet manager: what the numbers suggest"},
+        "cooling_unit": {"type": "string", "enum": list(MAINT_COOLING)},
+        "urgency": {"type": "string", "enum": list(MAINT_URGENCY)},
+        "evidence": {"type": "array", "items": {"type": "string"}, "maxItems": 4},
+        "recommended_actions": {"type": "array", "items": {"type": "string"}, "maxItems": 4},
+    },
+}
+MAINT_EXTRA = (
+    "This time you are doing a MAINTENANCE REVIEW of the refrigeration unit. The input is a summary that code computed "
+    "from the sensor history (overall and per day); you have not seen raw readings. Say that this is an early-warning "
+    "indicator, not a prediction, and never claim a failure is certain. Use only the numbers given. If enough_data is false "
+    "or recovery_enough is false, set cooling_unit to 'not enough data' and say what is missing. Recovery means the minutes "
+    "the hold needs to return to its earlier temperature after a door opening; a rising recovery time is the early sign of "
+    "a weakening unit. Do not talk about product status or theft."
+)
 
 FRAME_SYSTEM = (
     "You are the INCIDENT agent inspecting a still frame from a camera inside a delivery vehicle's cargo hold. "
@@ -353,6 +414,13 @@ class Explainer:
         agent = agent_for(kind)
         res = self._ask(AGENTS[agent]["system"], [{"text": json.dumps(ctx, default=str)}], EXPLAIN_SCHEMA)
         return {**res, "agent": agent, "explained_by": self.label(agent)} if res else None
+
+    def maintenance(self, rep: dict[str, Any]) -> dict[str, Any] | None:
+        """The Thermal agent's maintenance review of a maintenance.report() summary (one call; guarded like all the others)."""
+        res = self._ask(AGENTS["thermal"]["system"] + " " + MAINT_EXTRA, [{"text": json.dumps(rep, default=str)}], MAINT_SCHEMA)
+        if not res or res["cooling_unit"] not in MAINT_COOLING or res["urgency"] not in MAINT_URGENCY:
+            return None
+        return {**res, "agent": "thermal", "explained_by": self.label("thermal")}
 
     def describe_frame(self, jpeg_b64: str) -> dict[str, Any] | None:
         if not self.vision:

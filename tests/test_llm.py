@@ -275,3 +275,57 @@ def test_no_calls_at_all_when_ai_is_off(env):
     env.setattr(llm.httpx, "post", net)
     ex = make(llm_mode="off")
     assert ex.explain({}, "DOOR_AJAR") is None and ex.usage() is None and net.calls == 0
+
+
+def test_the_minute_limit_is_shared_by_every_program(env, tmp_path):
+    """The reported peak of 12/min came from two programs running at once: they must share one window."""
+    env.setenv("GEMINI_API_KEY", "k")
+    net = Counting()
+    env.setattr(llm.httpx, "post", net)
+    usage = str(tmp_path / "usage.json")
+    a = make(llm_mode="auto", gemini_rpm=4, gemini_usage_file=usage)     # e.g. the server
+    b = make(llm_mode="auto", gemini_rpm=4, gemini_usage_file=usage)     # e.g. the key check, at the same moment
+    results = [a.explain({}, "DOOR_AJAR") for _ in range(3)] + [b.explain({}, "DOOR_AJAR") for _ in range(3)]
+    assert net.calls == 4 and sum(r is not None for r in results) == 4
+
+
+def test_a_429_in_one_program_pauses_all_of_them(env, tmp_path):
+    env.setenv("GEMINI_API_KEY", "k")
+    usage = str(tmp_path / "usage.json")
+    env.setattr(llm.httpx, "post", Counting(err=http_error(429)))
+    a = make(llm_mode="auto", gemini_usage_file=usage)
+    assert a.explain({}, "DOOR_AJAR") is None
+    net = Counting()
+    env.setattr(llm.httpx, "post", net)
+    b = make(llm_mode="auto", gemini_usage_file=usage)
+    assert b.explain({}, "DOOR_AJAR") is None and net.calls == 0
+
+
+def test_a_stale_lock_file_does_not_block_calls(env, tmp_path):
+    env.setenv("GEMINI_API_KEY", "k")
+    net = Counting()
+    env.setattr(llm.httpx, "post", net)
+    usage = tmp_path / "usage.json"
+    lock = usage.with_suffix(".lock")
+    lock.write_text("x")
+    os.utime(lock, (time.time() - 60, time.time() - 60))                # left behind by a crashed program
+    assert make(llm_mode="auto", gemini_usage_file=str(usage)).explain({}, "DOOR_AJAR") is not None
+
+
+def test_repeats_within_a_minute_keep_the_rule_text(env, tmp_path):
+    import importlib
+    for k, v in {"COLDTRUST_DB": str(tmp_path / "t.db"), "COLDTRUST_EVIDENCE_DIR": str(tmp_path / "ev"),
+                 "COLDTRUST_STRICT_TIME": "0", "TELEGRAM_BOT_TOKEN": "", "COLDTRUST_LLM": "off"}.items():
+        env.setenv(k, v)
+    import backend.agent as a
+    import backend.config as c
+    importlib.reload(c)
+    importlib.reload(a)
+    a._ai_last.clear()
+    new = {"scenario": "DOOR_AJAR", "notify_reason": "new"}
+    again = {"scenario": "DOOR_AJAR", "notify_reason": "status_change"}
+    assert a._ai_due(new, now=1000) is True
+    assert a._ai_due(again, now=1030) is False                           # same situation 30 s later: no new call
+    assert a._ai_due({"scenario": "DOOR_AJAR", "notify_reason": "escalated"}, now=1031) is True
+    assert a._ai_due({"scenario": "FREEZE_RISK", "notify_reason": "reminder"}, now=1032) is True   # different situation
+    assert a._ai_due(again, now=1100) is True                            # a minute later it is allowed again
