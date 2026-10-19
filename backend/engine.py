@@ -451,7 +451,7 @@ class Engine:
         truck = epcis.giai(VEHICLE["id"])
         read_point = self._read_point()
         if not self.store.kv_get("epcis_departed"):
-            self.store.add_epcis(epcis.departing_event(epcs, now, cfg.tz_offset, location_gln("Dallas Depot"), truck))
+            self.store.add_epcis(epcis.departing_event(epcs, now, cfg.tz_offset, location_gln("Shah Alam Depot"), truck))
             self.store.kv_set("epcis_departed", True)
         self.store.add_epcis(epcis.transport_event(
             epcs, now, cfg.tz_offset, read_point=read_point, vehicle=truck, device=epcis.giai(VEHICLE["device_id"]),

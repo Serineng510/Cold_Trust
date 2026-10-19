@@ -208,7 +208,7 @@ def test_light_while_stopped_before_the_route_is_active_is_not_theft(eng):
 
 
 def test_light_while_stopped_at_an_authorised_dock_is_handling(eng):
-    eng.set_vehicle({"route_status": "En route", "speed_mph": 0, "authorised_stop": True, "zone": "Memphis Dock 4"})
+    eng.set_vehicle({"route_status": "En route", "speed_mph": 0, "authorised_stop": True, "zone": "Johor Bahru Dock 4"})
     assert _light_event(eng)["scenario"] == "AUTHORISED_HANDLING"
 
 
@@ -218,7 +218,7 @@ def test_simulated_stopped_theft_scenario(eng):
 
 
 def test_door_open_at_a_dock_does_not_hide_a_temperature_alarm(eng):
-    eng.set_vehicle({"route_status": "En route", "speed_mph": 0, "authorised_stop": True, "zone": "Memphis Dock 4"})
+    eng.set_vehicle({"route_status": "En route", "speed_mph": 0, "authorised_stop": True, "zone": "Johor Bahru Dock 4"})
     base = 1_800_000_000
     hot = [{"t": base + i * 5, "temp_c": 11, "hum": 50, "light": 700 + i % 3} for i in range(1, 13)]
     r = eng.ingest(IngestIn(**build_payload(1, base + 60, hot, "EVENT", "LIGHT")))
@@ -226,5 +226,5 @@ def test_door_open_at_a_dock_does_not_hide_a_temperature_alarm(eng):
     cool = [{"t": base + 60 + i * 5, "temp_c": 3, "hum": 50, "light": 700 + i % 3} for i in range(1, 13)]
     eng2 = Engine(Store(":memory:"), Settings(strict_time=False, device_secret=SECRET))
     seed(eng2.store)
-    eng2.set_vehicle({"route_status": "En route", "speed_mph": 0, "authorised_stop": True, "zone": "Memphis Dock 4"})
+    eng2.set_vehicle({"route_status": "En route", "speed_mph": 0, "authorised_stop": True, "zone": "Johor Bahru Dock 4"})
     assert eng2.ingest(IngestIn(**build_payload(1, base + 120, cool, "EVENT", "LIGHT")))["scenario"] == "AUTHORISED_HANDLING"

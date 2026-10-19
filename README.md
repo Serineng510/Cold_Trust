@@ -26,13 +26,32 @@ testing so simulator runs do not message your Telegram group.
 * Use `--reset` between scenarios for a clean demo; scenarios run back to back share excursion history.
 * To test a real-time run, start the server without `--timelapse` and run the simulator without it too (~3-9 min per scenario).
 
+## AI agents (Gemini) and the map (open source)
+
+Three role-specific agents explain what the rules decided (they never change the status): **Thermal** (temperature,
+freeze risk), **Seal** (door/light, authorised handling, data trust) and **Incident** (suspicious person, theft).
+Put `GEMINI_API_KEY` in `cold-chain/.env`, run `.venv\Scripts\python -m backend.gemini_check`, restart the backend.
+Each explanation in the audit log is tagged with its agent, e.g. "Gemini · Thermal agent". With no key the rule-based
+text is used. Free-tier Gemini may use submitted content to improve Google products, so only reading summaries are
+sent by default; camera frames need `COLDTRUST_VISION=on`.
+
+Map: [Leaflet](https://leafletjs.com) (BSD-2, vendored in `dashboard/vendor/leaflet`) with
+[OpenStreetMap](https://www.openstreetmap.org/copyright) tiles (© OpenStreetMap contributors, ODbL; needs internet,
+falls back to a schematic SVG if Leaflet is missing). The route is real road geometry fetched once from the public
+[OSRM](https://project-osrm.org) demo server by `tools/fetch_route.py` and stored in `backend/route_data.py`, so the
+running system makes no routing calls. Re-run `.venv\Scripts\python -m tools.fetch_route` after changing stops.
+OSM's tile servers and the OSRM demo server are for light use; do not point a large public deployment at them.
+
 ## Configuration (environment)
 
 | Variable | Default | Meaning |
 |---|---|---|
 | `COLDTRUST_SECRET` | `dev-secret-change-me` | HMAC key shared with the firmware. **Change it.** |
-| `COLDTRUST_LLM` | `auto` | `auto` = use Claude only if `ANTHROPIC_API_KEY` is set; `on`; `off` |
-| `COLDTRUST_MODEL` | `claude-opus-5-5` | Model for explanations and frame analysis |
+| `COLDTRUST_LLM` | `auto` | `auto` = AI agents run only if an API key is set; `on`; `off` |
+| `COLDTRUST_LLM_PROVIDER` | `auto` | `auto` = Gemini when `GEMINI_API_KEY` is set (else Claude if `ANTHROPIC_API_KEY`); `gemini`; `anthropic` |
+| `GEMINI_API_KEY`, `GEMINI_MODEL` | unset, `gemini-3.5-flash-lite` (15/min, 500/day free) | Key from https://aistudio.google.com/apikey; verify with `python -m backend.gemini_check` |
+| `COLDTRUST_VISION` | `off` | `on` lets the Incident agent analyse camera frames (images of people leave the laptop) |
+| `COLDTRUST_MODEL` | `claude-opus-5-5` | Model when the provider is `anthropic` |
 | `TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHAT_IDS` | unset | Comma-separated chat ids for driver and admin |
 | `COLDTRUST_BUDGET_SCALE` | `1.0` | Multiply excursion budgets (e.g. `0.1` for a short live demo) |
 | `COLDTRUST_RATE_C_PER_MIN` / `_STEP_C` / `_LIGHT_PCT` | `0.5` / `5` / `30` | Detection thresholds |
@@ -40,7 +59,7 @@ testing so simulator runs do not message your Telegram group.
 | `COLDTRUST_DB` / `COLDTRUST_EVIDENCE_DIR` | `data/...` | Storage locations |
 | `COLDTRUST_SILENT_AFTER_S` / `COLDTRUST_GPS_STALE_S` | `1800` / `600` | Watchdog thresholds |
 | `COLDTRUST_TEMP_CROSSCHECK_C` | `3` | Allowed gap between the two thermometers |
-| `COLDTRUST_TZ_OFFSET` | `-05:00` | Local offset written into EPCIS events (demo route is US Central) |
+| `COLDTRUST_TZ_OFFSET` | `+08:00` | Local offset written into EPCIS events (demo route is Malaysia) |
 
 ## API
 

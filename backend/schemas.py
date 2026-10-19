@@ -10,7 +10,7 @@ class SampleIn(BaseModel):
     t: int = Field(description="Epoch seconds when the sample was taken")
     temp_c: float = Field(ge=-60, le=125)
     hum: float = Field(default=0, ge=0, le=100)
-    light: int = Field(ge=0, le=1023, description="Raw ADC, higher = brighter")
+    light: int = Field(ge=0, le=1024, description="Raw ADC, higher = brighter (an ESP8266 reads 1024 when saturated)")
     temp2_c: float | None = Field(default=None, ge=-60, le=125, description="Optional second thermometer")
 
 

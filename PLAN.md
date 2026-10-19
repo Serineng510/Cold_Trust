@@ -83,7 +83,7 @@ plus the general [Cross-Sector Cybersecurity Performance Goals 2.0](https://www.
 | "Consider use of an additional, less exposed thermometer as independent verification" (Custodial Care) | Optional second thermometer (`temp2_c`, e.g. a $1 DS18B20). A gap above 3 °C for 3 samples raises `SENSOR_DISAGREEMENT` and an EPCIS `ERROR_CONDITION` | Built in backend and simulator; firmware wiring pending |
 | "What response plans have been developed if temperature does not hold or connectivity is lost?" (Critical Questions) | Watchdog: `NODE_SILENT` after 2 missed routine pings, `NODE_RESTORED` when data resumes | Built, tested |
 | "Ensure transporter GPS is activated; conduct active surveillance while vehicle is on the road" (Last Mile) | Watchdog: `GPS_STALE` when the position stops updating en route | Built, tested |
-| "Identify alternative custodians" (Custodial Care, Critical Questions) | Backup cold store (Texarkana) in the route data; thermal, freeze and silent-node advice names it | Built (demo data) |
+| "Identify alternative custodians" (Custodial Care, Critical Questions) | Backup cold store (Seremban) in the route data; thermal, freeze and silent-node advice names it | Built (demo data) |
 | "What capability exists to track and verify cold chain of custody?" (Critical Questions) | Custody tokens revoked on quarantine (existing) + hash-verified EPCIS trip record (new) | Built, tested |
 | "Staged transporter cargoes ... susceptible to tampering"; "monitor staged cargo" (Last Mile) | Light and camera rules fire whether moving or parked; only authorised geofences stay quiet | Already built |
 | "Develop notification protocols ... who should be contacted in emergencies" (Last Mile) | Telegram group, change-based alerts, 10-min reminders | Built; escalation contact list planned |
@@ -99,7 +99,7 @@ Vocabulary was checked against [ref.gs1.org](https://ref.gs1.org/cbv/BizStep) an
 
 | Trip moment | bizStep | disposition | Extra |
 |---|---|---|---|
-| First telemetry | `departing` | `in_transit` | Dallas Depot GLN |
+| First telemetry | `departing` | `in_transit` | Shah Alam Depot GLN |
 | Every accepted device ping | `transporting` | `in_transit` | `sensorElementList`: Temperature (min/max/mean, `CEL`), RelativeHumidity (`P1`), light level; `ALARM_CONDITION` when out of limits or bright, `ERROR_CONDITION` when data is suspect |
 | Package under review | `holding` | `unknown` | "segregated for further review" |
 | Package quarantined | `inspecting` | `non_conformant` | `persistentDisposition: set` |
@@ -352,7 +352,7 @@ Reconciles the intervals in the brief:
   "freeze_sensitive": true,
   "light_sensitive": true,
   "handling_tags": ["Fragile", "Cold chain"],
-  "destination": "Memphis, TN",
+  "destination": "Johor Bahru, Johor",
   "recipient": "TechFlow Inc."
 }
 ```

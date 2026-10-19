@@ -8,6 +8,7 @@
   --accent:#ecf0a6; --on-accent:#16180a;
   --ok:#3fcf8e; --warn:#f2b441; --crit:#ff6b5e; --info:#6aa8ff;
   --map:#101317; --road:#232830; --road2:#2d343d;
+  --tile-filter:invert(1) hue-rotate(180deg) brightness(.92) contrast(.88) saturate(.7);
   --term-bg:#0a0c0e; --term-fg:#cfd6df; --term-dim:#6f7a86; --term-kv:#9fb0c2; --term-line:#20262d;
   --shadow:0 10px 30px rgba(0,0,0,.45);
   --ui:"Instrument Sans",system-ui,-apple-system,"Segoe UI",sans-serif;
@@ -19,14 +20,14 @@
   --fg:#15181d; --mut:#556070; --dim:#7b8593;
   --accent:#3b4210; --on-accent:#f4f7c4;
   --ok:#17935e; --warn:#a96d00; --crit:#d23a2d; --info:#2d6ad6;
-  --map:#e6e9ee; --road:#d3d8df; --road2:#c3cad3;
+  --map:#e6e9ee; --road:#d3d8df; --road2:#c3cad3; --tile-filter:none;
   --term-bg:#12161a; --shadow:0 10px 30px rgba(20,30,50,.14); color-scheme:light}}
 :root[data-theme="light"]{
   --bg:#eef0f3; --panel:#ffffff; --panel2:#f5f6f8; --line:#dde1e6; --line2:#c9cfd6;
   --fg:#15181d; --mut:#556070; --dim:#7b8593;
   --accent:#3b4210; --on-accent:#f4f7c4;
   --ok:#17935e; --warn:#a96d00; --crit:#d23a2d; --info:#2d6ad6;
-  --map:#e6e9ee; --road:#d3d8df; --road2:#c3cad3;
+  --map:#e6e9ee; --road:#d3d8df; --road2:#c3cad3; --tile-filter:none;
   --term-bg:#12161a; --shadow:0 10px 30px rgba(20,30,50,.14); color-scheme:light}
 
 *{box-sizing:border-box}
@@ -126,7 +127,22 @@ a{color:inherit}
 
 /* map */
 .map{position:relative;background:var(--map);border-radius:14px;overflow:hidden;border:1px solid var(--line)}
-.map svg{display:block;width:100%;height:auto}
+.map > svg{display:block;width:100%;height:auto}
+.map{isolation:isolate}
+.mapslot,#mapslot{height:430px;width:100%}
+.mapslot{background:var(--map);font-family:var(--ui)}
+.mapslot .leaflet-tile-pane{filter:var(--tile-filter)}
+.mapslot .leaflet-control-attribution{background:color-mix(in srgb,var(--panel) 85%,transparent);color:var(--mut);font-size:10.5px}
+.mapslot .leaflet-control-attribution a{color:var(--info)}
+.mapslot .leaflet-bar a{background:var(--panel);color:var(--fg);border-color:var(--line2)}
+.fence-tip{background:color-mix(in srgb,var(--panel) 92%,transparent);color:var(--fg);border:1px solid var(--line2);box-shadow:none;font-size:11.5px;padding:2px 7px}
+.fence-tip::before{display:none}
+.truck-pin{background:none;border:0}
+.truck-pin .dot{position:absolute;inset:0;border-radius:50%;background:var(--accent);border:3px solid var(--panel);box-sizing:border-box}
+.truck-pin .pulse-ring{position:absolute;inset:-6px;border-radius:50%;background:var(--accent);animation:pulse 1.8s ease-out infinite}
+.truck-pin.alert .dot,.truck-pin.alert .pulse-ring{background:var(--crit)}
+.pin-label{position:absolute;left:24px;top:-8px;white-space:nowrap;background:var(--crit);color:#fff;font:700 11px var(--ui);padding:3px 9px;border-radius:99px}
+@media (max-width:760px){.mapslot,#mapslot{height:320px}}
 /* Map first with the telemetry panel as a strip below it; on very wide screens the panel moves to the left. */
 .mapgrid{display:grid;grid-template-columns:minmax(0,1fr);gap:12px;align-items:start}
 .mapgrid .map{order:-1}
@@ -135,7 +151,7 @@ a{color:inherit}
 @media (max-width:760px){.mapov{grid-template-columns:minmax(0,1fr)}}
 .mapov h4{margin:0;font-size:16px}
 .gauges{display:grid;grid-template-columns:1fr 1fr;gap:6px;margin-top:8px}
-.maptools{position:absolute;left:12px;top:12px;display:flex;flex-direction:column;gap:6px;align-items:flex-start}
+.maptools{position:absolute;z-index:1001;left:56px;top:12px;display:flex;flex-direction:column;gap:6px;align-items:flex-start}
 .tog{display:flex;align-items:center;gap:8px;background:color-mix(in srgb,var(--panel) 92%,transparent);border:1px solid var(--line);border-radius:999px;padding:5px 10px;font-size:12px}
 .tog .sw{width:28px;height:16px;border-radius:99px;background:var(--line2);position:relative}
 .tog .sw::after{content:"";position:absolute;top:2px;left:2px;width:12px;height:12px;border-radius:50%;background:var(--fg);transition:transform .15s}

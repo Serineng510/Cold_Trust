@@ -210,8 +210,8 @@ const FENCE_LABEL = { depot: 'Depot', bay: 'Authorised stop', backup: 'Backup co
 function mapSVG() {
   const W = 800, H = 380, pr = projector(W, H, 30), st = D.state, v = vehicle();
   let s = `<svg viewBox="0 0 ${W} ${H}" role="img" aria-label="Route map"><rect width="${W}" height="${H}" fill="var(--map)"/>`;
-  for (let la = Math.ceil(pr.minLat); la <= pr.maxLat; la++) s += `<line x1="0" x2="${W}" y1="${pr.Y(la)}" y2="${pr.Y(la)}" stroke="var(--road)"/><text x="6" y="${pr.Y(la) - 4}" font-size="10" fill="var(--dim)">${la}°N</text>`;
-  for (let lo = Math.ceil(pr.minLon); lo <= pr.maxLon; lo++) s += `<line y1="0" y2="${H}" x1="${pr.X(lo)}" x2="${pr.X(lo)}" stroke="var(--road)"/><text x="${pr.X(lo) + 4}" y="${H - 6}" font-size="10" fill="var(--dim)">${-lo}°W</text>`;
+  for (let la = Math.ceil(pr.minLat); la <= pr.maxLat; la++) s += `<line x1="0" x2="${W}" y1="${pr.Y(la)}" y2="${pr.Y(la)}" stroke="var(--road)"/><text x="6" y="${pr.Y(la) - 4}" font-size="10" fill="var(--dim)">${Math.abs(la)}°${la < 0 ? "S" : "N"}</text>`;
+  for (let lo = Math.ceil(pr.minLon); lo <= pr.maxLon; lo++) s += `<line y1="0" y2="${H}" x1="${pr.X(lo)}" x2="${pr.X(lo)}" stroke="var(--road)"/><text x="${pr.X(lo) + 4}" y="${H - 6}" font-size="10" fill="var(--dim)">${Math.abs(lo)}°${lo < 0 ? "W" : "E"}</text>`;
   if (S.mapFences) st.geofences.forEach(f => {
     const col = `var(--${FENCE_TONE[f.kind] || 'info'})`, r = Math.max(7, f.radius_m / 111000 * pr.s);
     const ly = f.kind === 'risk' ? pr.Y(f.lat) - r - 6 : pr.Y(f.lat) + r + 13;  // risk zones label above, so nearby stops stay readable
@@ -230,10 +230,71 @@ function mapSVG() {
   s += `<g transform="translate(${W - 42},${H - 46})"><circle r="26" fill="var(--panel)" stroke="var(--line2)"/><text y="-11" text-anchor="middle" font-size="10" fill="var(--mut)">N</text><path d="M0 -6 L5 9 L0 5 L-5 9Z" fill="var(--accent)"/></g>`;
   return s + '</svg>';
 }
+/* Fraction of the route travelled, measured on the lat/lon polyline itself (works with or without the tile map). */
+function routeProgressLL(lat, lon) {
+  const r = D.state.route, kx = Math.cos(lat * Math.PI / 180), P = ([a, b]) => [b * kx, a];
+  const pts = r.map(P), q = P([lat, lon]);
+  const lens = pts.slice(1).map((p, i) => Math.hypot(p[0] - pts[i][0], p[1] - pts[i][1]));
+  const total = lens.reduce((x, y) => x + y, 0);
+  let best = { d: Infinity, i: 0, f: 0 };
+  pts.slice(1).forEach((b, i) => {
+    const a = pts[i], dx = b[0] - a[0], dy = b[1] - a[1], L2 = dx * dx + dy * dy || 1;
+    const f = Math.max(0, Math.min(1, ((q[0] - a[0]) * dx + (q[1] - a[1]) * dy) / L2));
+    const dd = Math.hypot(a[0] + dx * f - q[0], a[1] + dy * f - q[1]);
+    if (dd < best.d) best = { d: dd, i, f };
+  });
+  const done = lens.slice(0, best.i).reduce((x, y) => x + y, 0) + lens[best.i] * best.f;
+  const a = r[best.i], b = r[best.i + 1];
+  const travelled = [...r.slice(0, best.i + 1), [a[0] + (b[0] - a[0]) * best.f, a[1] + (b[1] - a[1]) * best.f]];
+  return { frac: total ? done / total : 0, travelled };
+}
+
+/* Tile map: Leaflet (BSD-2, vendored) + OpenStreetMap tiles; the route is the OSRM road geometry from the backend.
+   One persistent map node is moved into each freshly rendered view, like the camera image. */
+const HAS_MAP = typeof window.L !== 'undefined';
+const cssVar = n => getComputedStyle(document.documentElement).getPropertyValue(n).trim() || '#888';
+const mapHost = document.createElement('div');
+mapHost.className = 'mapslot';
+let lmap = null, lmapLayers = null, lmapFit = '';
+function mapBlock() {
+  return `<div class="map">${HAS_MAP ? '<div id="mapslot"></div>' : mapSVG()}${mapTools()}</div>`;
+}
+function mountMap() {
+  const slot = $('#mapslot');
+  if (!slot || !HAS_MAP || !D.state) return;
+  slot.appendChild(mapHost);
+  if (!lmap) {
+    lmap = L.map(mapHost, { zoomControl: true, attributionControl: true, scrollWheelZoom: false });
+    L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {
+      maxZoom: 18, attribution: '&copy; <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener">OpenStreetMap</a> contributors' }).addTo(lmap);
+    lmapLayers = L.layerGroup().addTo(lmap);
+  }
+  const st = D.state, v = vehicle();
+  lmapLayers.clearLayers();
+  const line = st.route.map(p => [p[0], p[1]]);
+  const key = line.length + ':' + line[0] + ':' + line[line.length - 1];
+  L.polyline(line, { color: cssVar('--line2'), weight: 8, opacity: .9, lineCap: 'round' }).addTo(lmapLayers);
+  L.polyline(line, { color: cssVar('--info'), weight: 3, opacity: .85, dashArray: '2 7', lineCap: 'round' }).addTo(lmapLayers);
+  if (S.mapFences) st.geofences.forEach(f => {
+    const col = cssVar('--' + (FENCE_TONE[f.kind] || 'info'));
+    L.circle([f.lat, f.lon], { radius: f.radius_m, color: col, weight: 2, dashArray: '5 5', fillColor: col, fillOpacity: .14 })
+      .bindTooltip(`${f.name} · ${FENCE_LABEL[f.kind] || f.kind}`, { permanent: f.kind !== 'risk', direction: f.kind === 'risk' ? 'top' : 'bottom', className: 'fence-tip' }).addTo(lmapLayers);
+  });
+  if (v.lat !== undefined && v.lat !== null) {
+    if (S.mapRoutes) L.polyline(routeProgressLL(v.lat, v.lon).travelled, { color: cssVar('--accent'), weight: 5, lineCap: 'round' }).addTo(lmapLayers);
+    const al = S.mapAlerts ? activeAlerts() : [], alert = al.length;
+    const label = alert ? `<span class="pin-label">${esc(al[0].kind.replace(/_/g, ' ').slice(0, 22))}</span>` : '';
+    L.marker([v.lat, v.lon], { keyboard: false, zIndexOffset: 1000, icon: L.divIcon({ className: 'truck-pin' + (alert ? ' alert' : ''),
+      html: `<i class="pulse-ring"></i><i class="dot"></i>${label}`, iconSize: [20, 20], iconAnchor: [10, 10] }) }).addTo(lmapLayers);
+  }
+  lmap.invalidateSize(false);
+  const sz = lmap.getSize();   // fit only once the container really has a size; fitting a 0x0 map gives the whole-world view
+  if (lmapFit !== key && sz.x > 0 && sz.y > 0) { lmapFit = key; lmap.fitBounds(L.latLngBounds(line).pad(0.08), { animate: false }); }
+}
 function overlay() {
   const v = vehicle(), f = fleet(), al = activeAlerts();
   let prog = null;
-  if (v.lat !== undefined && v.lat !== null) prog = routeProgress(projector(800, 380, 30), v.lat, v.lon).frac;
+  if (v.lat !== undefined && v.lat !== null) prog = routeProgressLL(v.lat, v.lon).frac;
   const status = v.route_status || 'Idle', tone = /offline/i.test(status) ? 'crit' : /maint/i.test(status) ? 'warn' : /route/i.test(status) ? 'ok' : 'info';
   const remain = prog === null ? '-' : `${(f.route.distance_mi * (1 - prog)).toFixed(1)} mi left`;
   return `<div class="mapov"><div><div style="display:flex;justify-content:space-between;gap:8px;align-items:flex-start"><div><h4>${esc(f.id)}</h4><div class="mut" style="font-size:12.5px">${esc(v.zone || (v.authorised_stop ? 'Authorised stop' : 'Between stops'))}</div></div>${pill(tone, status)}</div>
@@ -286,7 +347,7 @@ function deliveryCard() {
   const st = D.state, sent = D.audit.filter(e => e.notified), last = sent[sent.length - 1];
   const row = (n, on, t, off = 'Off') => `<div class="row"><span>${n}</span>${on ? pill('ok', t) : pill('mut', off, false)}</div>`;
   return `<div class="card"><div class="h"><h3>Alert delivery</h3><span class="grow"></span>${last ? `<span class="chip">last alert <b class="tn">${fmtTime(last.ts)}</b></span>` : ''}</div>
-   <div class="b list">${row('Telegram · driver + admin', st.telegram, 'Connected', 'Not configured')}${row('Alarm sound + voice · this console', S.voice, 'On', 'Off (tap the speaker icon)')}${row('Claude explanations', st.llm, 'On', 'Rules only')}${row('Live link to backend', D.connected, 'Connected', 'Reconnecting')}
+   <div class="b list">${row('Telegram · driver + admin', st.telegram, 'Connected', 'Not configured')}${row('Alarm sound + voice · this console', S.voice, 'On', 'Off (tap the speaker icon)')}${row(st.llm ? `AI agents · ${esc(st.llm_provider)} (${esc(st.llm_model || '')})` : 'AI agents', st.llm, (st.llm_usage ? `${st.llm_usage.used}/${st.llm_usage.daily_cap} today` + (st.llm_usage.paused ? ' · paused' : '') + ' · ' : 'On · ') + (st.vision ? 'camera frames sent' : 'text only'), 'Rules only')}${row('Live link to backend', D.connected, 'Connected', 'Reconnecting')}
    <div class="note">Messages go out on a new problem, an escalation, a status change, or every 10 min while unresolved.</div></div></div>`;
 }
 
@@ -312,7 +373,7 @@ function paramsText(e) {
   return kv.join(' ');
 }
 function lineHTML(e) {
-  const src = e.explanation_source === 'llm' ? '<span class="src llm">Claude</span>' : e.explanation_source === 'human' ? '<span class="src">human</span>' : '<span class="src">rules</span>';
+  const src = e.explanation_source === 'llm' ? `<span class="src llm">${esc(e.explained_by || 'AI')}</span>` : e.explanation_source === 'human' ? '<span class="src">human</span>' : '<span class="src">rules</span>';
   const quiet = e.scenario === 'NORMAL';
   const acts = [...(e.actions || [])];
   if (e.notified) acts.push(`driver + admin notified (${e.notify_reason || 'alert'})`);
@@ -326,7 +387,7 @@ function lineHTML(e) {
 }
 function termCard() {
   const lines = D.audit.slice(-150).map(lineHTML).join('');
-  return `<div class="card"><div class="h"><h3>Agent reasoning &amp; audit log</h3><span class="grow"></span><span class="chip">Rules decide status · <b>${D.state.llm ? 'Claude explains' : 'rules explain'}</b></span></div>
+  return `<div class="card"><div class="h"><h3>Agent reasoning &amp; audit log</h3><span class="grow"></span><span class="chip">Rules decide status · <b>${D.state.llm ? esc(D.state.llm_provider) + ' agents explain' : 'rules explain'}</b></span></div>
    <div class="b"><div class="term" id="term" tabindex="0" aria-label="Agent audit log">${lines || '<div class="ln mut">Waiting for the first device ping…</div>'}<span class="cur"></span></div></div></div>`;
 }
 
@@ -334,7 +395,7 @@ function termCard() {
 function vOverview() {
   return `<div class="g g2"><div class="g">
      <div class="card"><div class="h"><h3>Operations map</h3><span class="grow"></span><span class="note">Live position, planned route and geofences</span></div>
-       <div class="b"><div class="mapgrid">${overlay()}<div class="map">${mapSVG()}${mapTools()}</div></div></div></div>
+       <div class="b"><div class="mapgrid">${overlay()}${mapBlock()}</div></div></div>
      ${termCard()}</div>
    <div class="g start">${speedCard()}${climateCard()}${cameraCard()}${deliveryCard()}</div></div>`;
 }
@@ -434,11 +495,11 @@ function vMaintenance() {
      ${ind.map(([tone, a, b]) => `<div class="row"><span><b>${esc(a)}</b><br><span class="mut">${esc(b)}</span></span>${pill(tone, tone === 'ok' ? 'Clear' : 'Watch')}</div>`).join('')}</div></div>`;
 }
 function vRoute() {
-  const v = vehicle(), pr = projector(800, 380, 30), st = D.state;
-  const vf = v.lat !== undefined && v.lat !== null ? routeProgress(pr, v.lat, v.lon).frac : null;
-  const fences = st.geofences.map(f => ({ ...f, frac: routeProgress(pr, f.lat, f.lon).frac })).sort((a, b) => a.frac - b.frac);
+  const v = vehicle(), st = D.state;
+  const vf = v.lat !== undefined && v.lat !== null ? routeProgressLL(v.lat, v.lon).frac : null;
+  const fences = st.geofences.map(f => ({ ...f, frac: routeProgressLL(f.lat, f.lon).frac })).sort((a, b) => a.frac - b.frac);
   return `<div class="g g2"><div class="card"><div class="h"><h3>Route and geofences</h3><span class="grow"></span><span class="chip">Progress <b class="tn">${vf === null ? '-' : Math.round(vf * 100) + '%'}</b></span></div>
-     <div class="b"><div class="mapgrid">${overlay()}<div class="map">${mapSVG()}${mapTools()}</div></div></div></div>
+     <div class="b"><div class="mapgrid">${overlay()}${mapBlock()}</div></div></div>
    <div class="g start"><div class="card"><div class="h"><h3>Stops and zones</h3></div><div class="b"><div class="tl">
      ${fences.map(f => { const state = vf === null ? 'upcoming' : f.frac < vf - 0.02 ? 'passed' : f.frac <= vf + 0.02 ? 'here' : 'upcoming'; const cls = f.kind === 'risk' ? 'warn' : state === 'passed' ? 'ok' : state === 'here' ? 'crit' : ''; return `<div class="${cls}"><b>${esc(f.name)}</b> ${pill(FENCE_TONE[f.kind] || 'info', FENCE_LABEL[f.kind] || f.kind, false)}<br><span class="mut">${state === 'passed' ? 'Passed' : state === 'here' ? 'Vehicle is here' : 'Ahead'} · ${f.authorised ? 'door opening allowed' : 'door opening never expected'}</span></div>`; }).join('')}</div></div></div>
      <div class="card"><div class="h"><h3>Why geofences matter</h3></div><div class="b mut">The same light spike is routine at an authorised dock and an emergency on the highway. The agent checks the zone before it decides, and names the backup cold store when cooling fails.</div></div></div></div>`;
@@ -599,6 +660,7 @@ function renderView() {
   $('#view').innerHTML = v();
   const slot = $('#camslot');
   if (slot) slot.appendChild(camImg);
+  try { mountMap(); } catch (e) { console.error('map', e); }
   const t = $('#term');
   if (t) t.scrollTop = S.termStick ? t.scrollHeight : S.termTop;
 }

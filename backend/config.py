@@ -64,7 +64,7 @@ class Settings:
     gps_stale_s: float = _float("COLDTRUST_GPS_STALE_S", 600)
 
     # EPCIS
-    tz_offset: str = os.getenv("COLDTRUST_TZ_OFFSET", "-05:00")  # demo route is Dallas-Memphis (US Central, CDT)
+    tz_offset: str = os.getenv("COLDTRUST_TZ_OFFSET", "+08:00")  # demo route is Shah Alam-Johor Bahru (Malaysia time, UTC+8)
 
     # Demo: lets the dashboard drive a simulated temperature on a node whose sensor cannot show room temperature.
     # Off by default; simulated readings are always labelled as simulated in the dashboard, audit log and EPCIS.
@@ -74,8 +74,17 @@ class Settings:
     budget_scale: float = _float("COLDTRUST_BUDGET_SCALE", 1.0)  # <1 shrinks excursion budgets for demos
 
     # LLM
-    llm_mode: str = os.getenv("COLDTRUST_LLM", "auto")  # auto: only if ANTHROPIC_API_KEY is set | on | off
-    llm_model: str = os.getenv("COLDTRUST_MODEL", "claude-opus-5-5")
+    llm_mode: str = os.getenv("COLDTRUST_LLM", "auto")  # auto: only if an API key is set | on | off
+    llm_provider: str = os.getenv("COLDTRUST_LLM_PROVIDER", "auto")  # auto (Gemini if GEMINI_API_KEY) | gemini | anthropic
+    # Free tier only. Default = a Flash-Lite model: 15 requests/min and 500/day free (the full Flash models allow 20/day).
+    gemini_model: str = os.getenv("GEMINI_MODEL", "gemini-3.5-flash-lite")
+    gemini_fallback_models: str = os.getenv("GEMINI_FALLBACK_MODELS", "gemini-3.1-flash-lite")  # tried if the name is unknown (404)
+    gemini_rpm: int = int(_float("COLDTRUST_GEMINI_RPM", 0))   # 0 = automatic: 60 % of the model's free per-minute limit
+    gemini_rpd: int = int(_float("COLDTRUST_GEMINI_RPD", 0))   # 0 = automatic: 80 % of the model's free per-day limit
+    gemini_usage_file: str = os.getenv("COLDTRUST_GEMINI_USAGE_FILE", "data/gemini_usage.json")  # survives --reset
+    llm_model: str = os.getenv("COLDTRUST_MODEL", "claude-opus-5-5")  # used only by the anthropic provider
+    # Camera frames contain people, so sending them to a cloud model is a separate opt-in.
+    vision_enabled: bool = _bool("COLDTRUST_VISION", False)
 
     # Telegram (optional)
     telegram_token: str = os.getenv("TELEGRAM_BOT_TOKEN", "")

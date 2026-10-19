@@ -119,7 +119,10 @@ From the `cold-chain` folder:
 .venv\Scripts\python -m camera.camera_agent --url http://127.0.0.1:8000 --show
 ```
 
-- If camera 0 is the laptop's built-in webcam, add `--source 1`.
+- Which camera? `python -m camera.camera_agent --list` prints the names with their `--source` numbers (needs `pygrabber`).
+  Pick the Logitech by its number; virtual cameras (NVIDIA Broadcast, OBS) give no picture.
+- Run **one** agent only: a second one posting to the same dashboard makes the video flicker.
+- Capture is 640x480 at 30 fps by default. At 1280x720 a Logitech C310 drops to ~7 fps with pulsing brightness (`--width`/`--height` to change).
 - The first run downloads two small MediaPipe model files (pose 5.8 MB, hands 7.8 MB) into `camera/models/`.
 - The agent draws the pose skeleton, face points and hand landmarks, streams that video to the dashboard's
   **Cargo camera** card, and reports people to the backend with simple cues: hands raised, reaching, crouching,

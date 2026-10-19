@@ -174,7 +174,7 @@ def test_watchdog_is_off_in_timelapse(eng):
 def test_thermal_advice_names_the_backup_custodian(eng):
     res = run_scenario(eng, "compressor_fail")
     advice = next(r["entry"]["recommended_actions"] for r in res if r["scenario"] == "THERMAL_EXCURSION")
-    assert any("Texarkana Cold Store" in a for a in advice)
+    assert any("Seremban Cold Store" in a for a in advice)
 
 
 def _load_agent(monkeypatch, tmp_path, **env):
@@ -215,12 +215,12 @@ def test_epcis_endpoints(monkeypatch, tmp_path):
 
 
 def test_gps_position_sets_zone_and_authorised_stop(eng):
-    eng.set_vehicle({"lat": 32.7767, "lon": -96.7970, "speed_mph": 0})       # parked at Dallas Depot
+    eng.set_vehicle({"lat": 3.0738, "lon": 101.5183, "speed_mph": 0})       # parked at Shah Alam Depot
     v = eng.store.kv_get("vehicle")
-    assert v["zone"] == "Dallas Depot" and v["authorised_stop"] is True
-    eng.set_vehicle({"lat": 33.0500, "lon": -96.1000, "speed_mph": 60})      # on the highway
+    assert v["zone"] == "Shah Alam Depot" and v["authorised_stop"] is True
+    eng.set_vehicle({"lat": 2.9000, "lon": 101.7000, "speed_mph": 60})      # on the highway
     v = eng.store.kv_get("vehicle")
     assert v["zone"] is None and v["authorised_stop"] is False
-    eng.set_vehicle({"lat": 33.6, "lon": -94.4, "speed_mph": 0})              # stopped in the high-risk zone
+    eng.set_vehicle({"lat": 2.0136, "lon": 103.0599, "speed_mph": 0})              # stopped in the high-risk zone
     v = eng.store.kv_get("vehicle")
-    assert v["zone"] == "I-30 High-Risk Stretch" and v["authorised_stop"] is False
+    assert v["zone"] == "NSE High-Risk Stretch" and v["authorised_stop"] is False

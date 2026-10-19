@@ -31,7 +31,7 @@ def statuses(eng):
 
 
 def test_person_at_authorised_stop_is_logged_not_alerted(eng):
-    eng.set_vehicle({"speed_mph": 0, "authorised_stop": True, "zone": "Memphis Dock 4"})
+    eng.set_vehicle({"speed_mph": 0, "authorised_stop": True, "zone": "Johor Bahru Dock 4"})
     r = eng.person_observed(person(), now=1000)
     assert r["entry"]["kind"] == "PERSON_AT_AUTHORISED_STOP" and r["notify"] is False
     assert statuses(eng) == {"NORMAL"}
@@ -58,7 +58,7 @@ def test_same_person_is_not_logged_twice_but_new_behaviour_is(eng):
 
 
 def test_person_with_door_open_is_theft(eng):
-    eng.set_vehicle({"speed_mph": 0, "authorised_stop": False, "zone": "I-30 High-Risk Stretch"})
+    eng.set_vehicle({"speed_mph": 0, "authorised_stop": False, "zone": "NSE High-Risk Stretch"})
     base = 1_800_000_000
     samples = [{"t": base + i * 5, "temp_c": 3, "hum": 50, "light": 700 + i % 3} for i in range(1, 7)]
     from backend.schemas import IngestIn

@@ -2,7 +2,7 @@
 
 What it does, continuously:
 - Detects people with MediaPipe pose + hand landmarks and draws the skeleton overlay.
-- Streams the annotated video to the dashboard (POST /api/camera/frame, about 5 frames per second).
+- Streams the annotated video to the dashboard (POST /api/camera/frame, about 10 frames per second).
 - Tells the backend when a person appears, leaves, or does something new (POST /api/camera/observation).
   The backend decides what it means: handling at an authorised stop, a SUSPICIOUS_PERSON alert elsewhere,
   or theft if the hold is lit at the same time.
@@ -71,13 +71,15 @@ class Backend:
 class Source:
     """Webcam index, or a video/image file for testing without the camera."""
 
-    def __init__(self, source: str):
+    def __init__(self, source: str, width: int = 640, height: int = 480):
         self.still = None
         if source.isdigit():
             idx = int(source)
             self.cap = cv2.VideoCapture(idx, cv2.CAP_DSHOW) if sys.platform == "win32" else cv2.VideoCapture(idx)
-            self.cap.set(cv2.CAP_PROP_FRAME_WIDTH, 1280)
-            self.cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 720)
+            # Webcams such as the Logitech C310 drop to ~7 fps with pulsing exposure at 1280x720; 640x480 stays at 30 fps.
+            self.cap.set(cv2.CAP_PROP_FOURCC, cv2.VideoWriter_fourcc(*"MJPG"))
+            self.cap.set(cv2.CAP_PROP_FRAME_WIDTH, width)
+            self.cap.set(cv2.CAP_PROP_FRAME_HEIGHT, height)
         elif Path(source).suffix.lower() in (".jpg", ".jpeg", ".png", ".bmp"):
             self.still, self.cap = cv2.imread(source), None
         else:
@@ -109,19 +111,30 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--url", default="http://127.0.0.1:8000", help="ColdTrust backend")
     ap.add_argument("--source", default="0", help="camera index (0, 1...) or an image/video file for testing")
     ap.add_argument("--cam", help="same as --source with a camera index (kept for older commands)")
-    ap.add_argument("--fps", type=int, default=10, help="frames analysed per second")
-    ap.add_argument("--stream-fps", type=int, default=5, help="annotated frames sent to the dashboard per second")
+    ap.add_argument("--list", action="store_true", help="print camera names with their index numbers and exit (Windows)")
+    ap.add_argument("--width", type=int, default=640, help="capture width (raise only if the camera holds 30 fps)")
+    ap.add_argument("--height", type=int, default=480, help="capture height")
+    ap.add_argument("--fps", type=int, default=15, help="frames analysed per second")
+    ap.add_argument("--stream-fps", type=int, default=10, help="annotated frames sent to the dashboard per second")
     ap.add_argument("--key", help="device key (default: COLDTRUST_SECRET from cold-chain/.env)")
     ap.add_argument("--show", action="store_true", help="also show a local preview window (q to quit)")
     ap.add_argument("--once", action="store_true", help="analyse a single frame, save camera/annotated.jpg, exit")
     a = ap.parse_args(argv)
     if a.cam is not None:
         a.source = a.cam
+    if a.list:
+        try:
+            from pygrabber.dshow_graph import FilterGraph
+            for i, name in enumerate(FilterGraph().get_input_devices()):
+                print(f"  --source {i}   {name}")
+        except ImportError:
+            print("Install pygrabber to list camera names:  .venv\Scripts\pip install pygrabber")
+        return 0
     if a.key is None:
         from backend.config import load
         a.key = load().device_secret
 
-    src = Source(a.source)
+    src = Source(a.source, a.width, a.height)
     frame = src.read()
     if frame is None:
         print(f"No image from {a.source}. For a camera, run `python -m camera.cam_test` first.")

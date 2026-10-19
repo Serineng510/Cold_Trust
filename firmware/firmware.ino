@@ -92,6 +92,7 @@ void IRAM_ATTR onLightDo() { doChanged = true; }
 
 uint16_t readLight() {                          // 0..1023, higher = brighter
   int raw = analogRead(PIN_LIGHT_AO);
+  raw = constrain(raw, 0, 1023);                             // the ESP8266 ADC returns 1024 when saturated
   return LIGHT_INVERT ? 1023 - raw : raw;
 }
 
@@ -200,6 +201,13 @@ bool postChunk(const char *pingType, const char *trigger) {
   if (code > 0) resp = http.getString();
   http.end();
 
+  if (code >= 400 && code < 500) {               // the server understood and refused these readings: retrying cannot help,
+    lastSentT = newestT;                         // and keeping them would block every later reading
+    lastSendResult = String("HTTP ") + code + " (server refused " + n + " readings; dropped)";
+    Serial.print("Send refused: ");
+    Serial.println(lastSendResult);
+    return true;
+  }
   if (code != 200) {
     lastSendResult = String("HTTP ") + code + " (kept " + unsentCount() + " readings to retry)";
     Serial.print("Send failed: ");
@@ -261,7 +269,8 @@ void updateAlarmOutputs() {
 void refreshLightValue() {
   if (ALLOW_MOCK && mockLightOn) {
     lightMocked = true;
-    lightNow = constrain((int)(mockLightPct * 10.23f) + (int)random(-3, 4), 0, 1023);
+    int v = (int)(mockLightPct * 10.23f) + (int)random(-3, 4);   // evaluate random() ONCE: constrain() is a macro that
+    lightNow = constrain(v, 0, 1023);                            // would call it up to 3 times and could return -2 (= 65534)
   } else {
     lightMocked = false;
     lightNow = readLight();

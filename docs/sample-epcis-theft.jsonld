@@ -14,7 +14,7 @@
         "eventID": "ni:///sha-256;917f420956ab21a40de2997e0751b97df5b46b01164089a8f68fb482d3d945e8?ver=CBV2.0",
         "type": "ObjectEvent",
         "eventTime": "2027-01-15T08:01:00.000Z",
-        "eventTimeZoneOffset": "-05:00",
+        "eventTimeZoneOffset": "+08:00",
         "epcList": [
           "https://id.gs1.org/00/095212340000012481",
           "https://id.gs1.org/00/095212340000023647",
@@ -42,7 +42,7 @@
         "eventID": "ni:///sha-256;dda3f6afc8b96e0f105e7957a6c903e91ddf0ced908359db72f32344a91437d3?ver=CBV2.0",
         "type": "ObjectEvent",
         "eventTime": "2027-01-15T08:01:00.000Z",
-        "eventTimeZoneOffset": "-05:00",
+        "eventTimeZoneOffset": "+08:00",
         "epcList": [
           "https://id.gs1.org/00/095212340000012481",
           "https://id.gs1.org/00/095212340000023647",
@@ -98,7 +98,7 @@
         "eventID": "ni:///sha-256;823229b2ea9312c9f3a17f2afe154ea4dd79a8c23f0da8cb6e8fda584587e7ab?ver=CBV2.0",
         "type": "ObjectEvent",
         "eventTime": "2027-01-15T08:02:00.000Z",
-        "eventTimeZoneOffset": "-05:00",
+        "eventTimeZoneOffset": "+08:00",
         "epcList": [
           "https://id.gs1.org/00/095212340000012481",
           "https://id.gs1.org/00/095212340000023647",
@@ -154,7 +154,7 @@
         "eventID": "ni:///sha-256;c0a2363058c79c9432fdea9eefcd67915c1a3450cce066449bf166ed23dc243e?ver=CBV2.0",
         "type": "ObjectEvent",
         "eventTime": "2027-01-15T08:03:00.000Z",
-        "eventTimeZoneOffset": "-05:00",
+        "eventTimeZoneOffset": "+08:00",
         "epcList": [
           "https://id.gs1.org/00/095212340000012481",
           "https://id.gs1.org/00/095212340000023647",
@@ -210,7 +210,7 @@
         "eventID": "ni:///sha-256;dc5f94966f4b7fcae4b3d8e59d99c7de1755ca3e46ee59df95703ebcba61efed?ver=CBV2.0",
         "type": "ObjectEvent",
         "eventTime": "2027-01-15T08:03:25.000Z",
-        "eventTimeZoneOffset": "-05:00",
+        "eventTimeZoneOffset": "+08:00",
         "epcList": [
           "https://id.gs1.org/00/095212340000012481",
           "https://id.gs1.org/00/095212340000023647",
@@ -271,7 +271,7 @@
         "eventID": "ni:///sha-256;da7f40ea2acf271e9094aae397459a8fdad86c8643359ea56207ac57144269a7?ver=CBV2.0",
         "type": "ObjectEvent",
         "eventTime": "2027-01-15T08:03:25.000Z",
-        "eventTimeZoneOffset": "-05:00",
+        "eventTimeZoneOffset": "+08:00",
         "epcList": [
           "https://id.gs1.org/00/095212340000012481",
           "https://id.gs1.org/00/095212340000023647",
@@ -303,7 +303,7 @@
         "eventID": "ni:///sha-256;6979c1c55bc5d0ae29b3e563adf12cf409f5803fb27280228dc27b2071c24a4c?ver=CBV2.0",
         "type": "ObjectEvent",
         "eventTime": "2027-01-15T08:33:25.000Z",
-        "eventTimeZoneOffset": "-05:00",
+        "eventTimeZoneOffset": "+08:00",
         "epcList": [
           "https://id.gs1.org/00/095212340000088417"
         ],

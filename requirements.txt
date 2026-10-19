@@ -7,3 +7,4 @@ pytest>=8.0
 jsonschema>=4.0  # tests: validate EPCIS output against GS1's schema
 opencv-contrib-python>=4.8,<5  # camera/ (C270 capture; 5.x dropped the HOG fallback detector)
 mediapipe>=1.0  # camera/ (pose + hand landmarks for person detection)
+pygrabber; sys_platform == "win32"  # camera names for `camera_agent --list`

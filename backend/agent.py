@@ -18,6 +18,8 @@ from pathlib import Path
 from typing import Any
 
 from fastapi import FastAPI, Header, HTTPException, Request, WebSocket, WebSocketDisconnect
+from fastapi.exception_handlers import request_validation_exception_handler
+from fastapi.exceptions import RequestValidationError
 from fastapi.responses import FileResponse, JSONResponse, Response, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 
@@ -62,6 +64,15 @@ async def lifespan(_: FastAPI):
 
 
 app = FastAPI(title="ColdTrust agent", version="0.1", lifespan=lifespan)
+
+
+@app.exception_handler(RequestValidationError)
+async def _log_rejected_request(request: Request, exc: RequestValidationError):
+    """Say WHY a device or the dashboard was refused (a bare 422 in the access log hides the field)."""
+    log.warning("422 %s %s: %s", request.method, request.url.path,
+                "; ".join(f"{'.'.join(str(x) for x in e['loc'])}: {e['msg']} (got {str(e.get('input'))[:40]})"
+                          for e in exc.errors())[:400])
+    return await request_validation_exception_handler(request, exc)
 _sockets: set[WebSocket] = set()
 _tasks: set[asyncio.Task] = set()  # keep references so background tasks are not garbage-collected
 
@@ -105,7 +116,7 @@ async def _deliver(entry: dict[str, Any]) -> None:
 
 
 async def _refine(entry: dict[str, Any]) -> None:
-    """Replace the template explanation with Claude's once it arrives (status is never changed here)."""
+    """Replace the template explanation with the AI agent's once it arrives (status is never changed here)."""
     if not explainer.enabled:
         return
     packages = {p["id"]: p for p in store.list_packages()}
@@ -120,12 +131,12 @@ async def _refine(entry: dict[str, Any]) -> None:
              "status": pk["status"], "risk_score": pk["risk_score"]}
             for pid, pk in packages.items() if pid in entry["affected"] or pk["status"] != "NORMAL"][:6],
     }
-    res = await asyncio.to_thread(explainer.explain, ctx)
+    res = await asyncio.to_thread(explainer.explain, ctx, entry["kind"])
     if not res:
         return
     doc = store.update_audit(entry["id"], {
         "reasoning": res["explanation"], "product_impact": res["product_impact"],
-        "recommended_actions": res["recommended_actions"], "explanation_source": "llm"})
+        "recommended_actions": res["recommended_actions"], "explanation_source": "llm", "explained_by": res["explained_by"]})
     if doc:
         await broadcast({"type": "audit_update", "entry": {"id": entry["id"], "ts": entry["ts"], **doc}})
 
@@ -286,13 +297,13 @@ async def evidence(e: EvidenceIn, x_coldtrust_key: str | None = Header(default=N
         engine.camera_observation({"person_present": res["person_present"], "description": res["description"],
                                    "source": "vision"}, now)
         doc = store.update_audit(entry["id"], {
-            "reasoning": res["description"], "explanation_source": "llm",
+            "reasoning": res["description"], "explanation_source": "llm", "explained_by": res["explained_by"],
             "params": {**entry["params"], "person_present": res["person_present"],
                        "cargo_door_open": res["cargo_door_open"], "confidence": res["confidence"]}})
         if doc:
             await broadcast({"type": "audit_update", "entry": {"id": entry["id"], "ts": now, **doc}})
 
-    if explainer.enabled:
+    if explainer.vision:
         _spawn(analyse())
     return {"stored": name, "sha256": digest, "entry": entry}
 
@@ -312,7 +323,8 @@ async def evidence_file(name: str):
 @app.get("/api/state")
 async def state() -> dict[str, Any]:
     return {**engine.state(), "fleet": VEHICLE, "geofences": GEOFENCES, "route": ROUTE, "camera_feed": _feed_status(),
-            "llm": explainer.enabled, "telegram": notifier.enabled, "server_time": time.time()}
+            "llm": explainer.enabled, "llm_provider": explainer.provider_label, "llm_model": explainer.model,
+            "vision": explainer.vision, "llm_usage": explainer.usage(), "telegram": notifier.enabled, "server_time": time.time()}
 
 
 @app.get("/api/audit")

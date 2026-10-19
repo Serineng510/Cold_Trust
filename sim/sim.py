@@ -115,7 +115,7 @@ def theft(clock: Clock) -> list[Step]:
 def authorised_stop(clock: Clock) -> list[Step]:
     steps = normal_drive(clock, 2)
     t = 2 * BATCH_S + 10
-    steps.append(Step(at=t, samples=[], vehicle={"speed_mph": 0, "zone": "Memphis Dock 4",
+    steps.append(Step(at=t, samples=[], vehicle={"speed_mph": 0, "zone": "Johor Bahru Dock 4",
                                                  "authorised_stop": True, "route_status": "Unloading"}))
     light = lambda x: BRIGHT if x >= t else DARK
     steps.append(Step(at=t + DT, samples=clock.window(t + DT, lambda x: 3, light, span=30),
@@ -235,7 +235,7 @@ def position_along_route(fraction: float) -> tuple[float, float]:
 
 
 # Where along the route each scenario plays out (fraction of the trip).
-SCENARIO_LEG = {"normal": (0.05, 0.20), "door_ajar": (0.25, 0.35), "theft": (0.32, 0.34),
+SCENARIO_LEG = {"normal": (0.05, 0.20), "door_ajar": (0.25, 0.35), "theft": (0.68, 0.72),
                 "authorised_stop": (0.97, 1.0), "compressor_fail": (0.36, 0.70), "freeze": (0.40, 0.45),
                 "replay": (0.20, 0.24), "spoof": (0.50, 0.58), "sensor_disagree": (0.60, 0.66),
                 "stopped_theft": (0.12, 0.13)}

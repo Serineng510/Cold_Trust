@@ -153,7 +153,7 @@ The same person is not logged twice unless a new cue appears (reaching, crouchin
 
 - **Watchdog** (real-time mode): alerts when the node stops sending (30 min) or the GPS position goes stale (10 min),
   and again when it recovers.
-- **Backup cold store** (Texarkana) named in the advice when cooling fails or the node goes silent.
+- **Backup cold store** (Seremban) named in the advice when cooling fails or the node goes silent.
 - **GS1 EPCIS 2.0 records** for departure, every reading batch, holds, quarantines and releases, each with a
   tamper-evident hash ID that matches GS1's own sandbox; export from the profile menu or `/api/epcis`.
 - **Security:** refuses to start on real hardware with the default device key; camera uploads must carry the device
@@ -257,12 +257,13 @@ therefore **mock the temperature and the light**, and it is never hidden:
 
 | Item | Status |
 |---|---|
-| Backend, rules, dashboard, camera agent | Working; 56 automated tests pass |
+| Backend, rules, dashboard, camera agent | Working; 70 automated tests pass |
 | Firmware message format | Accepted by the backend in real-hardware mode with the real key |
 | Firmware on the board | **Not yet confirmed**: needs ArduinoJson 7 and the Adafruit DHT library installed, then a full run |
 | Board → laptop connection | Blocked until the Wi-Fi is set to Private and Python is allowed (see section 8) |
 | Telegram photo alerts | Built and tested offline; not yet sent to the group |
-| Claude explanations | Built; need an `ANTHROPIC_API_KEY` to run |
+| AI agents (Thermal, Seal, Incident) | Built on the Gemini API (Claude optional); mocked-HTTP tests pass; **not yet run against live Gemini**: add `GEMINI_API_KEY` and run `python -m backend.gemini_check` |
+| Map | Leaflet + OpenStreetMap tiles with an OSRM road route; verified in the browser |
 
 - DHT11 is ±2 °C with whole-degree readings; on a desk at room temperature the 2–8 °C alarm will fire. Use a cooler
   box with ice packs for tests and the demo.
@@ -281,7 +282,8 @@ therefore **mock the temperature and the light**, and it is never hidden:
 | `backend/epcis.py` | GS1 EPCIS 2.0 records and hash IDs |
 | `backend/notify.py`, `telegram_setup.py` | Telegram messages and photos; setup helper |
 | `backend/seed.py` | Truck, packages, route, geofences, backup cold store |
-| `backend/llm.py` | Optional Claude explanations and frame descriptions |
+| `backend/llm.py`, `gemini_check.py` | The three AI agents (Gemini or Claude), frame analysis, key check |
+| `tools/fetch_route.py`, `backend/route_data.py` | OSRM road route for the map (fetched once) |
 | `dashboard/` | `index.html`, `app.js`, `styles.css` (`mockup.html` = the original design mockup) |
 | `camera/` | `cam_test.py`, `camera_agent.py`, `pose.py` |
 | `firmware/` | `firmware.ino`, `secrets.example.h`, `wiring.svg`, `README.md`, `tests/01–06` |

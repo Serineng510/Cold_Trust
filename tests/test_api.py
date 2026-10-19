@@ -230,3 +230,11 @@ def test_telegram_alerts_say_when_they_come_from_mock_data(monkeypatch, tmp_path
     client.post("/api/telemetry", json=build_payload(2, base + 120, [sample(base + 60 + i * 5, 4) for i in range(1, 13)]))
     asyncio.run(a._deliver(entry))                                    # real reading again: tag gone
     assert sent[-1].startswith("[CRITICAL]")
+
+
+def test_saturated_adc_reading_of_1024_is_accepted(client):
+    """An ESP8266 analogRead() returns 1024 when the light sensor saturates; that must not be a validation error."""
+    t0 = 1_800_000_000
+    p = build_payload(1, t0 + 60, [{"t": t0 + 60, "temp_c": 3, "hum": 50, "light": 1024}])
+    r = client.post("/api/telemetry", json=p)
+    assert r.status_code == 200 and r.json()["accepted"] is True
