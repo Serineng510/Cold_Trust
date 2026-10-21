@@ -162,6 +162,31 @@ def door_open_without_thermal_response(samples: Sequence[Sample], ambient_c: flo
     return (max(temps) - min(temps)) == 0 and max(temps) <= ambient_c - 10
 
 
+def humidity_response(samples: Sequence[Sample], bright_pct: float, min_open_s: float,
+                      hum_move_pct: float = 3.0, temp_move_c: float = 1.0) -> str | None:
+    """Humidity is a second, independent witness to an open door: warm outside air changes it as well as the temperature.
+
+    None while the door has not been open long enough to judge. Otherwise, over the last `min_open_s` seconds:
+      'both_flat'  neither temperature nor humidity moved       -> the readings look frozen or replayed
+      'hum_only'   humidity moved but the temperature did not   -> the two sensors contradict each other
+      'temp_only'  temperature moved but humidity did not       -> noted only (DHT11 humidity is coarse)
+      'both_move'  both moved                                   -> consistent with a real open door
+    `hum_move_pct` has to be calibrated on the real hardware; the default is a starting point.
+    """
+    if bright_duration_s(samples, bright_pct) < min_open_s:
+        return None
+    window = [s for s in samples if s.t >= samples[-1].t - min_open_s]
+    if len(window) < 3:
+        return None
+    temp_moved = max(s.temp_c for s in window) - min(s.temp_c for s in window) >= temp_move_c
+    hum_moved = max(s.hum for s in window) - min(s.hum for s in window) >= hum_move_pct
+    if temp_moved and hum_moved:
+        return "both_move"
+    if temp_moved:
+        return "temp_only"
+    return "hum_only" if hum_moved else "both_flat"
+
+
 def sensors_disagree(samples: Sequence[Sample], tolerance_c: float = 3.0, consecutive: int = 3) -> bool:
     """The two thermometers differ by more than their combined error for several samples in a row.
 

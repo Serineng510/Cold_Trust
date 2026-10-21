@@ -154,3 +154,21 @@ def rule_summary(rep: dict[str, Any]) -> dict[str, Any]:
                "none": ["No action needed; keep monitoring"]}[urgency]
     return {"assessment": text, "cooling_unit": unit, "urgency": urgency,
             "evidence": [i["title"] for i in rep["indicators"]][:4], "recommended_actions": actions}
+
+
+def report_gate(review: dict[str, Any] | None, incident_ts: float) -> tuple[bool, str]:
+    """May an incident report be made for a TEMPERATURE event? Only when a maintenance review has shown that it is a maintenance
+    matter: the AI wrote the review, there was enough history, it found the cooling unit possibly weakening, and the review's
+    period covers the event. Returns (allowed, reason when not). Security events (person, theft, tampering) never use this."""
+    if not review:
+        return False, "No maintenance review has been done yet. Open Maintenance, choose a period and press Summarise with AI."
+    if review.get("source") != "ai":
+        return False, "The latest maintenance review was written by rules because the AI was unavailable. Run it again with the AI."
+    if not review.get("enough_data"):
+        return False, "The maintenance review did not have enough sensor history to judge the cooling unit."
+    if review.get("cooling_unit") != "possible weakening":
+        return False, (f"The maintenance review found: {review.get('cooling_unit')}. A temperature event is only reported "
+                       "when the review shows the cooling unit may be failing.")
+    if review.get("from") is None or not review["from"] <= incident_ts <= (review.get("to") or 0):
+        return False, "The latest maintenance review does not cover the time of this event. Run a new review."
+    return True, ""

@@ -24,14 +24,14 @@ from fastapi.exceptions import RequestValidationError
 from fastapi.responses import FileResponse, JSONResponse, Response, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 
-from . import epcis, maintenance
+from . import approvals, auth as auth_mod, context, epcis, maintenance, report, trust
 from .config import DEFAULT_SECRET, load
 from .engine import Engine, STATUS_LABEL
-from .llm import Explainer
+from .llm import Explainer, agent_for
 from .notify import Notifier
-from .schemas import (ActorIn, CameraObservationIn, DemoMockIn, EvidenceIn, IngestIn, MaintenanceIn, OverrideIn, ReassignIn,
+from .schemas import (ActorIn, ApprovalDecisionIn, CameraObservationIn, DemoMockIn, EvidenceIn, IngestIn, LoginIn, MaintenanceIn, OverrideIn, ReassignIn,
                       VehicleActionIn, VehicleIn)
-from .seed import GEOFENCES, ROUTE, VEHICLE, seed
+from .seed import BACKUP_CUSTODIAN, GEOFENCES, ROUTE, VEHICLE, seed
 from .store import Store
 
 log = logging.getLogger("coldtrust")
@@ -46,11 +46,17 @@ if cfg.device_secret == DEFAULT_SECRET or len(cfg.device_secret) < 16:
             "firmware. (Simulator-only runs with --timelapse are allowed to use the default.)")
     log.warning("Using the default device secret. Fine for simulation; never for real hardware.")
 
+auth = auth_mod.Auth.from_config(cfg)
+if not auth.enabled:
+    log.warning("OPEN ACCESS: no COLDTRUST_ADMIN_CODE is set, so anyone who can reach this server can use every control. "
+                "Fine for a demo on your own PC; set the passwords in .env before sharing the dashboard.")
+
 store = Store(cfg.db_path)
 seed(store)
 engine = Engine(store, cfg)
 explainer = Explainer(cfg)
 notifier = Notifier(cfg)
+approval_queue = approvals.Queue(store)
 
 WATCHDOG_EVERY_S = 15
 
@@ -65,6 +71,7 @@ async def lifespan(_: FastAPI):
 
 
 app = FastAPI(title="ColdTrust agent", version="0.1", lifespan=lifespan)
+app.add_middleware(auth_mod.AuthMiddleware, auth=auth)
 
 
 @app.exception_handler(RequestValidationError)
@@ -97,23 +104,66 @@ async def broadcast(message: dict[str, Any]) -> None:
 PHOTO_ALERTS = {"SUSPICIOUS_PERSON", "THEFT_SUSPECTED", "DOOR_AJAR"}
 
 
-async def _deliver(entry: dict[str, Any]) -> None:
-    """Out-of-band message to driver and admin (Telegram). Voice is played by the browser from entry['voice'].
-    Person and door alerts carry the latest annotated camera frame when the camera is live."""
-    prefix = {"reminder": "REMINDER, still unresolved. ", "escalated": "ESCALATED. ",
-              "status_change": "STATUS CHANGE. "}.get(entry.get("notify_reason") or "", "")
-    # Alerts raised while the node is sending mock readings must say so, or a demo reads like a real incident.
+def _mock_tag() -> str:
+    """Alerts raised while the node is sending mock readings must say so, or a demo reads like a real incident."""
     demo = engine.demo_state()
     mocked = [name for key, name in (("simulated_temp", "temperature"), ("simulated_light", "light")) if demo[key]]
-    tag = f"[MOCK DATA: {' + '.join(mocked)}] " if mocked else ""
-    text = f"{tag}{prefix}[{entry['severity'].upper()}] {entry['kind']}: {entry['reasoning']}"
-    if entry.get("actions"):
-        text += "\n" + "\n".join(entry["actions"][:4]) + (" ..." if len(entry["actions"]) > 4 else "")
+    return f"[MOCK DATA: {' + '.join(mocked)}] " if mocked else ""
+
+
+def _ai_message(entry: dict[str, Any], ai: dict[str, Any], tag: str, prefix: str) -> str:
+    """The single Telegram message when the AI analysis is ready: what the rules decided, then the agent's explanation."""
+    lines = [f"{tag}{prefix}[{entry['severity'].upper()}] {entry['kind']} ({ai['explained_by']})", ai["explanation"]]
+    if ai.get("product_impact"):
+        lines.append(f"Impact: {ai['product_impact']}")
+    if ai.get("recommended_actions"):
+        lines.append("Next: " + "; ".join(ai["recommended_actions"][:3]))
+    status = f"Status: {entry['verdict_label']}"
+    if entry.get("affected"):
+        status += f" ({', '.join(entry['affected'][:6])}{' ...' if len(entry['affected']) > 6 else ''})"
+    lines.append(status)
+    lines += trust.data_check_line(entry.get("seal"))
+    return "\n".join(lines)
+
+
+async def _deliver(entry: dict[str, Any], ai: dict[str, Any] | None = None) -> None:
+    """Out-of-band message to driver and admin (Telegram), ONE per alert: the AI analysis when `ai` is given, otherwise the
+    rule-based text. Voice is played by the browser from entry['voice']. Person and door alerts carry the latest annotated
+    camera frame when the camera is live."""
+    prefix = {"reminder": "REMINDER, still unresolved. ", "escalated": "ESCALATED. ",
+              "status_change": "STATUS CHANGE. "}.get(entry.get("notify_reason") or "", "")
+    tag = _mock_tag()
+    if ai:
+        text = _ai_message(entry, ai, tag, prefix)
+    else:
+        text = f"{tag}{prefix}[{entry['severity'].upper()}] {entry['kind']}: {entry['reasoning']}"
+        if entry.get("actions"):
+            text += "\n" + "\n".join(entry["actions"][:4]) + (" ..." if len(entry["actions"]) > 4 else "")
+        text += "".join("\n" + line for line in trust.data_check_line(entry.get("seal")))
+    waiting = approval_queue.for_audit(entry["id"], engine.now()) if "id" in entry else []
+    if waiting:
+        text += "\nAwaiting admin approval: " + "; ".join(i["label"] for i in waiting)
     frame = _frame.get("jpeg") if time.time() - _frame.get("ts", 0) <= 15 else None
     if entry["kind"] in PHOTO_ALERTS and frame:
         await asyncio.to_thread(notifier.send_photo, frame, text)
     else:
         await asyncio.to_thread(notifier.send, text)
+
+
+async def _notify_with_ai(entry: dict[str, Any]) -> None:
+    """Wait a few seconds for the AI analysis and send it as THE alert message. If it is slow, off, paused or rejected by
+    the number check, the rule-based text goes out instead. The dashboard log gets the AI text whenever it arrives."""
+    refine = asyncio.ensure_future(_refine(entry))
+    _tasks.add(refine)
+    refine.add_done_callback(_tasks.discard)
+    try:
+        res = await asyncio.wait_for(asyncio.shield(refine), timeout=cfg.telegram_ai_wait_s)
+    except asyncio.TimeoutError:
+        res = None
+    except Exception as exc:  # the AI path must never stop the alert from going out
+        log.warning("AI explanation failed: %s", exc)
+        res = None
+    await _deliver(entry, res)
 
 
 AI_MIN_GAP_S = 60
@@ -131,30 +181,110 @@ def _ai_due(entry: dict[str, Any], now: float | None = None) -> bool:
     return True
 
 
-async def _refine(entry: dict[str, Any]) -> None:
+async def _refine(entry: dict[str, Any]) -> dict[str, Any] | None:
+    """The AI analysis of an alert, then the follow-up proposals for an admin to approve (AI-chosen when the Incident agent
+    answered, otherwise the rules' defaults). Returns the AI answer, or None when there is none."""
+    res = None
+    try:
+        res = await _explain(entry)
+    finally:                      # the proposals must not depend on the AI being up
+        try:
+            await _propose(entry, res)
+        except Exception:
+            log.exception("could not queue proposals for #%s", entry.get("id"))
+    return res
+
+
+def _report_gate(entry: dict[str, Any]) -> tuple[bool, str]:
+    """Temperature events only become incident reports when a maintenance review supports it; security events always may."""
+    if entry.get("scenario") not in approvals.THERMAL:
+        return True, ""
+    return maintenance.report_gate(store.kv_get("maintenance_review"), entry["ts"])
+
+
+AUTO_REPORT_KINDS = {"SUSPICIOUS_PERSON", "THEFT_SUSPECTED"}   # a person in the hold: the report is prepared at once
+AUTO_REPORT_DELAY_S = 15       # lets the camera agent upload its evidence pictures first, so the report can embed them
+AUTO_REPORT_GAP_S = 1800       # one automatic report per kind of alert per 30 minutes, not one per reminder
+SYSTEM_REPORTER = {"name": "ColdTrust system (automatic draft)", "id": None, "role": "System", "auto": True}
+
+
+_auto_inflight: set[str] = set()
+
+
+def _wants_auto_report(entry: dict[str, Any]) -> bool:
+    return entry.get("scenario") in AUTO_REPORT_KINDS and entry.get("notify_reason") in ("new", "escalated")
+
+
+async def _auto_report(entry: dict[str, Any]) -> None:
+    """Prepare the incident report for a suspicious person or suspected theft without waiting for anyone to press a button.
+    The admin finds it ready to download; pressing "Prepare incident report" later makes a new version in their own name."""
+    kind = entry["scenario"]
+    if kind in _auto_inflight:
+        return
+    _auto_inflight.add(kind)
+    try:
+        await asyncio.sleep(AUTO_REPORT_DELAY_S)
+        now = engine.now()
+        done = store.kv_get("auto_reports", {})
+        if now - done.get(kind, -AUTO_REPORT_GAP_S) < AUTO_REPORT_GAP_S:
+            return
+        await _make_report(entry["id"], SYSTEM_REPORTER)
+        store.kv_set("auto_reports", {**store.kv_get("auto_reports", {}), kind: now})   # only after it worked, so a failure is retried
+    except Exception:
+        log.exception("automatic incident report failed for alert #%s", entry.get("id"))
+    finally:
+        _auto_inflight.discard(kind)
+
+
+def _dispatch(entry: dict[str, Any]) -> None:
+    """Send an alert on its way: ONE Telegram message (the AI analysis, or the rule text if it is late) and the dashboard log."""
+    if _wants_auto_report(entry):
+        _spawn(_auto_report(entry))
+    if cfg.telegram_ai and notifier.enabled and explainer.enabled:
+        _spawn(_notify_with_ai(entry))
+    else:
+        _spawn(_deliver(entry))
+        _spawn(_refine(entry))              # the dashboard log still gets the AI text and the proposals
+
+
+async def _propose(entry: dict[str, Any], res: dict[str, Any] | None) -> None:
+    if entry.get("scenario") not in approvals.PROPOSAL_SCENARIOS:
+        return
+    menu = approvals.allowed(entry, store.list_packages(), store.kv_get("vehicle", {}), _report_gate(entry)[0])
+    chosen = approvals.clean((res or {}).get("proposals"), menu)
+    source = res["explained_by"] if chosen and res else "rules"
+    if not chosen:
+        chosen = approvals.rule_proposals(entry, menu)
+    now = engine.now()
+    added = approval_queue.add(entry, chosen, source, now)
+    for item in added:
+        logged = _human_entry("APPROVAL_PROPOSED", source, f"Proposed for admin approval: {item['label']}. {item['reason']}",
+                              {"approval": item["id"], "action": item["action"], "alert": entry["id"]}, [])
+        await broadcast({"type": "audit", "entry": logged})
+    if added:
+        await broadcast({"type": "approvals", "items": approval_queue.list(now)[-15:]})
+
+
+async def _explain(entry: dict[str, Any]) -> dict[str, Any] | None:
     """Replace the template explanation with the AI agent's once it arrives (status is never changed here)."""
     if not explainer.enabled or not _ai_due(entry):
-        return
-    packages = {p["id"]: p for p in store.list_packages()}
-    ctx = {
-        "scenario": entry["scenario"], "severity": entry["severity"], "trigger": entry.get("trigger"),
-        "findings": entry["findings"], "readings": entry["params"],
-        "vehicle": {k: v for k, v in store.kv_get("vehicle", {}).items() if k in ("speed_kmh", "zone", "authorised_stop")},
-        "status_decided_by_rules": entry["verdict_label"], "risk_score": entry["risk_score"],
-        "products": [
-            {"id": pid, "description": pk["description"], "limits_c": [pk["temp_min_c"], pk["temp_max_c"]],
-             "excursion_budget_min": pk["excursion_budget_min"], "minutes_outside_limits": pk["excursion_min"],
-             "status": pk["status"], "risk_score": pk["risk_score"]}
-            for pid, pk in packages.items() if pid in entry["affected"] or pk["status"] != "NORMAL"][:6],
-    }
-    res = await asyncio.to_thread(explainer.explain, ctx, entry["kind"])
+        return None
+    ctx = context.build(entry, store.list_packages(), store.kv_get("vehicle", {}), _report_gate(entry)[0])
+    res, invented = await asyncio.to_thread(explainer.explain_checked, ctx, entry["kind"])
     if not res:
-        return
+        if invented:  # say so in the log: the AI answered, but quoted figures that are not in the data
+            doc = store.update_audit(entry["id"], {"ai_rejected": f"AI text rejected: {', '.join(invented)} not in the data; "
+                                                                  "the rule-based text is kept"})
+            if doc:
+                await broadcast({"type": "audit_update", "entry": {"id": entry["id"], "ts": entry["ts"], **doc}})
+        return None
     doc = store.update_audit(entry["id"], {
+        "consulted": f"Seal agent: {entry['seal']['label']}" if entry.get("seal") else None,
         "reasoning": res["explanation"], "product_impact": res["product_impact"],
         "recommended_actions": res["recommended_actions"], "explanation_source": "llm", "explained_by": res["explained_by"]})
     if doc:
         await broadcast({"type": "audit_update", "entry": {"id": entry["id"], "ts": entry["ts"], **doc}})
+    return res
 
 
 async def _watchdog() -> None:
@@ -177,9 +307,10 @@ async def _ingest(payload: IngestIn) -> dict[str, Any]:
     entry = result["entry"]
     await broadcast({"type": "audit", "entry": entry})
     if result["notify"]:
-        _spawn(_deliver(entry))
-    if result["accepted"] and result["notify"]:
-        _spawn(_refine(entry))
+        if result["accepted"]:
+            _dispatch(entry)
+        else:
+            _spawn(_deliver(entry))                 # a rejected payload is explained by rules only
     return {"accepted": result["accepted"], "reason": result.get("reason"), "entry": entry}
 
 
@@ -231,7 +362,7 @@ async def camera_observation(o: CameraObservationIn,
     if result:
         await broadcast({"type": "audit", "entry": result["entry"]})
         if result["notify"]:
-            _spawn(_deliver(result["entry"]))
+            _dispatch(result["entry"])              # person alerts get the Incident agent and its proposals too
     return {"ok": True, "entry": result["entry"] if result else None}
 
 
@@ -354,7 +485,18 @@ async def evidence_file(name: str):
 async def state() -> dict[str, Any]:
     return {**engine.state(), "fleet": VEHICLE, "geofences": GEOFENCES, "route": ROUTE, "camera_feed": _feed_status(),
             "llm": explainer.enabled, "llm_provider": explainer.provider_label, "llm_model": explainer.model,
-            "vision": explainer.vision, "llm_usage": explainer.usage(), "telegram": notifier.enabled, "server_time": time.time()}
+            "vision": explainer.vision, "llm_usage": explainer.usage(), "telegram": notifier.enabled, "server_time": time.time(),
+            "approvals": approval_queue.list(engine.now())[-15:], "report_gates": _report_gates()}
+
+
+def _report_gates() -> dict[int, dict[str, Any]]:
+    """For recent temperature alerts: may a report be made, and if not, why. Security alerts are not listed (always allowed)."""
+    out = {}
+    for e in store.audit_tail(150):
+        if e.get("notified") and e.get("scenario") in approvals.THERMAL:
+            ok, why = _report_gate(e)
+            out[e["id"]] = {"ok": ok, "reason": why}
+    return out
 
 
 @app.get("/api/audit")
@@ -383,6 +525,33 @@ async def maintenance_report(hours: int = 24) -> dict[str, Any]:
     return _maint_report(max(1, min(hours, 168)))
 
 
+async def _offer_thermal_reports() -> list[dict[str, Any]]:
+    """A maintenance review that finds the cooling unit may be failing is what justifies an incident report for the temperature
+    event it covers. Queue "Prepare the incident report" for the latest such event of each kind that has no report yet, for an
+    admin to approve. Returns the proposals now waiting (also shown under the review)."""
+    review = store.kv_get("maintenance_review")
+    now = engine.now()
+    audit = store.audit_tail(300)
+    reported = {e["params"].get("incident") for e in audit if e["kind"] == "REPORT_GENERATED"}
+    latest: dict[str, dict[str, Any]] = {}
+    for e in audit:
+        if e.get("notified") and e.get("scenario") in approvals.THERMAL:
+            latest[e["scenario"]] = e
+    offers = []
+    for e in latest.values():
+        if e["id"] in reported or not maintenance.report_gate(review, e["ts"])[0]:
+            continue
+        reason = (f"The maintenance review ({review['by']}) found the cooling unit may be failing, so this temperature event "
+                  "can be reported.")
+        for item in approval_queue.add(e, [{"action": approvals.PREPARE_REPORT, "reason": reason}], "Maintenance review", now):
+            logged = _human_entry("APPROVAL_PROPOSED", "Maintenance review", f"Proposed for admin approval: {item['label']}. {item['reason']}",
+                                  {"approval": item["id"], "action": item["action"], "alert": e["id"]}, [])
+            await broadcast({"type": "audit", "entry": logged})
+        offers += [i for i in approval_queue.for_audit(e["id"], now) if i["action"] == approvals.PREPARE_REPORT]
+    await broadcast({"type": "approvals", "items": approval_queue.list(now)[-15:]})
+    return offers
+
+
 MAINT_CACHE_S = 600
 _maint_cache: dict[str, tuple[float, dict[str, Any]]] = {}
 
@@ -402,10 +571,12 @@ async def maintenance_summary(body: MaintenanceIn) -> dict[str, Any]:
     elif not rep["enough_data"]:
         note = "Not enough history to ask the AI, so this is the rule-based summary."
     else:
-        res = await asyncio.to_thread(explainer.maintenance, rep)
+        res, invented = await asyncio.to_thread(explainer.maintenance_checked, rep)
         if res is None:
             reason = explainer.guard.blocked_reason
-            note = (f"The AI is paused ({reason}), so this is the rule-based summary." if reason
+            note = (f"The AI text was rejected ({', '.join(invented)} not in the data), so this is the rule-based summary."
+                    if invented else
+                    f"The AI is paused ({reason}), so this is the rule-based summary." if reason
                     else "The AI did not give a usable answer, so this is the rule-based summary.")
     summary = {k: res[k] for k in ("assessment", "cooling_unit", "urgency", "evidence", "recommended_actions")} if res \
         else maintenance.rule_summary(rep)
@@ -413,12 +584,94 @@ async def maintenance_summary(body: MaintenanceIn) -> dict[str, Any]:
            "note": note, "hours": body.hours, "cached": False, "usage": explainer.usage()}
     if res:
         _maint_cache[key] = (time.time(), {k: v for k, v in out.items() if k not in ("usage", "cached")})
+    # Remember the latest review: it decides whether a temperature event may be turned into an incident report (maintenance.report_gate)
+    store.kv_set("maintenance_review", {
+        "ts": time.time(), "source": out["source"], "by": out["agent"], "hours": body.hours, "from": rep["from"], "to": rep["to"],
+        "enough_data": rep["enough_data"], "cooling_unit": summary.get("cooling_unit"), "urgency": summary.get("urgency"),
+        "assessment": summary.get("assessment")})
+    out["report_offers"] = await _offer_thermal_reports()
     return out
 
 
+# ------------------------------------------------------------------ login, roles, identity
+
+def _session(request: Request) -> dict[str, Any] | None:
+    return request.scope.get("state", {}).get("user")
+
+
+def _actor(request: Request, claimed: str) -> str:
+    """Who did it. With login on, the name comes from the signed session; whatever the request says is ignored."""
+    user = _session(request)
+    return f"{user['n']} ({user['u']}, {user['r']})" if user else claimed
+
+
+def _headers(request: Request) -> dict[str, str]:
+    return {k.decode("latin-1").lower(): v.decode("latin-1") for k, v in request.scope.get("headers", [])}
+
+
+def _secure_cookie(request: Request) -> bool:
+    peer = request.client.host if request.client else None
+    forwarded = _headers(request).get("x-forwarded-proto", "") if peer in ("127.0.0.1", "::1") else ""
+    return request.url.scheme == "https" or forwarded == "https"
+
+
+@app.get("/api/me")
+async def me(request: Request) -> dict[str, Any]:
+    if not auth.enabled:
+        return {"auth": False, "role": "admin", "name": None}
+    user = _session(request)
+    return {"auth": True, "role": user["r"] if user else None, "name": user["n"] if user else None,
+            "id": user["u"] if user else None, "expires": user["e"] if user else None}
+
+
+@app.post("/api/login")
+async def login(body: LoginIn, request: Request) -> JSONResponse:
+    if not auth.enabled:
+        raise HTTPException(400, "login is not set up (open access): set COLDTRUST_ADMIN_CODE in .env")
+    ip = auth_mod.client_ip(request.client.host if request.client else None, _headers(request))
+    wait = auth.limiter.retry_after(ip)
+    if wait:
+        raise HTTPException(429, f"too many wrong passwords; try again in {wait} s", headers={"Retry-After": str(wait)})
+    cid = auth_mod.clean_id(body.company_id)
+    if len(cid) < 3:
+        raise HTTPException(422, "enter your company ID")
+    user = auth.authenticate(cid, body.code)
+    if user is None:
+        locked = auth.limiter.fail(ip)
+        entry = _human_entry("LOGIN_FAILED", "unknown", f"Failed login for company ID '{cid}' from {ip}"
+                             + (": locked out for 5 minutes after 5 wrong passwords." if locked else "."),
+                             {"ip": ip, "company_id": cid, "locked": locked}, [], severity="warning")
+        await broadcast({"type": "audit", "entry": entry})
+        if locked and notifier.enabled:
+            _spawn(asyncio.to_thread(notifier.send, f"SECURITY: 5 wrong passwords from {ip}. Login is locked for that address "
+                                                    "for 5 minutes."))
+        await asyncio.sleep(0.3)  # slows down guessing
+        raise HTTPException(401, "wrong company ID or password")
+    auth.limiter.ok(ip)
+    token, data = auth.issue(user)
+    who = f"{user.name} ({user.id}, {user.role})"
+    entry = _human_entry("LOGIN_OK", who, f"{user.name} ({user.id}) signed in as {user.role}.", {"ip": ip, "role": user.role}, [])
+    await broadcast({"type": "audit", "entry": entry})
+    resp = JSONResponse({"id": user.id, "name": user.name, "role": user.role, "expires": data["e"]})
+    resp.headers["set-cookie"] = auth_mod.cookie_header(token, int(auth.ttl), _secure_cookie(request))
+    return resp
+
+
+@app.post("/api/logout")
+async def logout(request: Request) -> JSONResponse:
+    user = _session(request)
+    if user:
+        auth.revoke(user)
+        entry = _human_entry("LOGOUT", f"{user['n']} ({user['u']}, {user['r']})", f"{user['n']} ({user['u']}) signed out.", {}, [])
+        await broadcast({"type": "audit", "entry": entry})
+    resp = JSONResponse({"ok": True})
+    resp.headers["set-cookie"] = auth_mod.clear_cookie_header(_secure_cookie(request))
+    return resp
+
+
 @app.post("/api/package/{pkg_id}/override")
-async def override(pkg_id: str, body: OverrideIn) -> dict[str, Any]:
-    entry = engine.override(pkg_id, body.status, body.reason, body.supervisor, engine.now())
+async def override(pkg_id: str, body: OverrideIn, request: Request) -> dict[str, Any]:
+    entry = engine.override(pkg_id, body.status, body.reason, _actor(request, body.supervisor), engine.now())
     if not entry:
         raise HTTPException(404, "unknown package")
     await broadcast({"type": "audit", "entry": entry})
@@ -426,9 +679,9 @@ async def override(pkg_id: str, body: OverrideIn) -> dict[str, Any]:
 
 
 def _human_entry(kind: str, by: str, reasoning: str, params: dict[str, Any], actions: list[str],
-                 affected: list[str] | None = None) -> dict[str, Any]:
+                 affected: list[str] | None = None, severity: str = "info") -> dict[str, Any]:
     now = engine.now()
-    entry = {"kind": kind, "scenario": kind, "ping_type": "MANUAL", "trigger": None, "severity": "info",
+    entry = {"kind": kind, "scenario": kind, "ping_type": "MANUAL", "trigger": None, "severity": severity,
              "device_id": None, "params": {"by": by, **params}, "findings": [], "verdict": "NONE",
              "verdict_label": "NO CHANGE", "risk_score": 0, "affected": affected or [], "actions": actions,
              "reasoning": reasoning, "recommended_actions": [], "explanation_source": "human", "notified": False}
@@ -438,14 +691,15 @@ def _human_entry(kind: str, by: str, reasoning: str, params: dict[str, Any], act
 
 
 @app.post("/api/audit/{audit_id}/ack")
-async def acknowledge(audit_id: int, body: ActorIn) -> dict[str, Any]:
+async def acknowledge(audit_id: int, body: ActorIn, request: Request) -> dict[str, Any]:
     """Someone has seen the alert and is acting on it (stops reminders being needed)."""
     original = store.audit_get(audit_id)
     if not original:
         raise HTTPException(404, "unknown alert")
-    entry = _human_entry("ALERT_ACKNOWLEDGED", body.by, f"{body.by} acknowledged {original['kind']} (#{audit_id}).",
+    who = _actor(request, body.by)
+    entry = _human_entry("ALERT_ACKNOWLEDGED", who, f"{who} acknowledged {original['kind']} (#{audit_id}).",
                          {"alert": audit_id}, [])
-    doc = store.update_audit(audit_id, {"acked_by": body.by, "acked_at": entry["ts"]})
+    doc = store.update_audit(audit_id, {"acked_by": who, "acked_at": entry["ts"]})
     await broadcast({"type": "audit", "entry": entry})
     if doc:
         await broadcast({"type": "audit_update", "entry": {"id": audit_id, "ts": original["ts"], **doc}})
@@ -453,14 +707,15 @@ async def acknowledge(audit_id: int, body: ActorIn) -> dict[str, Any]:
 
 
 @app.post("/api/package/{pkg_id}/reassign")
-async def reassign(pkg_id: str, body: ReassignIn) -> dict[str, Any]:
+async def reassign(pkg_id: str, body: ReassignIn, request: Request) -> dict[str, Any]:
     pk = store.get_package(pkg_id)
     if not pk:
         raise HTTPException(404, "unknown package")
     pk["reassign_to"] = body.truck
     store.upsert_package(pk)
-    entry = _human_entry("REASSIGN_REQUESTED", body.by,
-                         f"{body.by} asked to move {pkg_id} to {body.truck}: {body.reason}",
+    who = _actor(request, body.by)
+    entry = _human_entry("REASSIGN_REQUESTED", who,
+                         f"{who} asked to move {pkg_id} to {body.truck}: {body.reason}",
                          {"package": pkg_id, "truck": body.truck},
                          [f"{pkg_id}: transfer to {body.truck} requested; check its capacity and temperature limits"],
                          [pkg_id])
@@ -469,17 +724,132 @@ async def reassign(pkg_id: str, body: ReassignIn) -> dict[str, Any]:
 
 
 @app.post("/api/vehicle/action")
-async def vehicle_action(body: VehicleActionIn) -> dict[str, Any]:
+async def vehicle_action(body: VehicleActionIn, request: Request) -> dict[str, Any]:
+    user = _session(request)
+    if auth.enabled and body.action in auth_mod.ADMIN_ONLY_VEHICLE_ACTIONS and (not user or user["r"] != "admin"):
+        raise HTTPException(403, "admin only")          # a driver may activate the route, not take the vehicle offline
+    who = _actor(request, body.by)
     label = {"maintenance": "Maintenance requested", "offline": "Offline", "activate": "En route"}[body.action]
     cur = engine.set_vehicle({"route_status": label})
     if body.action == "activate":
         # The truck has left the depot: it is no longer at an authorised stop until GPS or a dock says so.
         cur.update(authorised_stop=False, zone=None)
         store.kv_set("vehicle", cur)
-    entry = _human_entry("VEHICLE_ACTION", body.by, f"{body.by}: {label}.", {"action": body.action}, [])
+    entry = _human_entry("VEHICLE_ACTION", who, f"{who}: {label}.", {"action": body.action}, [])
     await broadcast({"type": "vehicle", "vehicle": cur})
     await broadcast({"type": "audit", "entry": entry})
     return {"vehicle": cur, "entry": entry}
+
+
+@app.get("/api/approvals")
+async def list_approvals() -> list[dict[str, Any]]:
+    return approval_queue.list(engine.now())[-30:]
+
+
+def _reporter(request: Request, claimed: str) -> dict[str, Any]:
+    """Whoever pressed the button, from the signed session (open mode: the name the page sent)."""
+    user = _session(request)
+    return {"name": user["n"], "id": user["u"], "role": user["r"]} if user else {"name": claimed, "id": None, "role": "admin"}
+
+
+async def _make_report(audit_id: int, reporter: dict[str, Any]) -> dict[str, Any]:
+    """Fill the template for one alert, save it, and put the file's SHA-256 in the audit log."""
+    wording = None
+    entry = store.audit_get(audit_id)
+    if entry is None:
+        raise KeyError(audit_id)
+    allowed, why = _report_gate(entry)
+    if not allowed:                     # before any AI call is spent
+        raise report.ReportNotAllowed(why)
+    if explainer.enabled:               # one small AI call, only now; any failure leaves the report on its rule-based sentences
+        ctx = context.build(entry, store.list_packages(), store.kv_get("vehicle", {}))
+        wording = await asyncio.to_thread(explainer.report_text, ctx)
+    review = store.kv_get("maintenance_review")
+    info = await asyncio.to_thread(report.generate, cfg, store, audit_id, reporter, wording, review)
+    who = f"{reporter['name']} ({reporter['id']}, {reporter['role']})" if reporter.get("id") else reporter["name"]
+    entry = _human_entry(
+        "REPORT_GENERATED", who, f"{who} {'prepared automatically' if reporter.get('auto') else 'prepared'} incident report "
+        f"{info['report_number']} for alert #{audit_id} ({info['pictures']} picture(s) embedded).",
+        {"file": info["file"], "sha256": info["sha256"], "incident": audit_id, "report": info["report_number"],
+         "pictures": info["pictures"], "automatic": bool(reporter.get("auto"))}, [f"Saved as {info['file']}, SHA-256 {info['sha256'][:16]}…"])
+    await broadcast({"type": "audit", "entry": entry})
+    return {**info, "entry": entry, "url": f"/api/reports/{info['file']}"}
+
+
+def _report_errors(exc: Exception) -> HTTPException:
+    if isinstance(exc, KeyError):
+        return HTTPException(404, "unknown alert")
+    if isinstance(exc, report.ReportNotAllowed):
+        return HTTPException(409, str(exc))
+    if isinstance(exc, report.NotAnIncident):
+        return HTTPException(422, str(exc))
+    return HTTPException(500, f"the report template could not be used: {exc}")
+
+
+@app.post("/api/incidents/{audit_id}/report")
+async def incident_report(audit_id: int, body: ActorIn, request: Request) -> dict[str, Any]:
+    """Admin only. The person who presses the button is the reporter named in the report."""
+    try:
+        return await _make_report(audit_id, _reporter(request, body.by))
+    except (KeyError, report.NotAnIncident, OSError, ValueError) as exc:
+        raise _report_errors(exc)
+
+
+@app.get("/api/reports/{name}")
+async def report_file(name: str):
+    path = Path(cfg.reports_dir) / name
+    if not report.REPORT_NAME.match(name) or not path.is_file():
+        raise HTTPException(404)
+    return FileResponse(path, filename=name, media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document")
+
+
+async def _execute(item: dict[str, Any], who: str, reporter: dict[str, Any]) -> list[str]:
+    """Carry out an approved proposal with the same code paths as the manual controls. Only the four menu actions exist."""
+    now = engine.now()
+    action = item["action"]
+    if action == approvals.QUARANTINE:
+        done = []
+        for pk in store.list_packages():
+            if pk["status"] != "QUARANTINED":
+                entry = engine.override(pk["id"], "QUARANTINED", f"approved by {who}: {item['label']} (proposal #{item['id']})",
+                                        who, now)
+                if entry:
+                    await broadcast({"type": "audit", "entry": entry})
+                    done.append(pk["id"])
+        return [f"{len(done)} package(s) quarantined; custody tokens revoked"] if done else ["nothing left to quarantine"]
+    if action == approvals.OFFLINE:
+        cur = engine.set_vehicle({"route_status": "Offline"})
+        await broadcast({"type": "vehicle", "vehicle": cur})
+        return ["vehicle marked offline"]
+    if action == approvals.DIVERT:
+        text = (f"{_mock_tag()}DIVERT: go to the backup cold store, {BACKUP_CUSTODIAN}. Approved by {who} for alert "
+                f"#{item['audit_id']} ({item['kind']}).")
+        if notifier.enabled:
+            _spawn(asyncio.to_thread(notifier.send, text))
+        return [f"driver told to divert to {BACKUP_CUSTODIAN}" + ("" if notifier.enabled else " (Telegram off: dashboard only)")]
+    try:                                           # PREPARE_REPORT: the approving admin is the reporter
+        info = await _make_report(item["audit_id"], reporter)
+        return [f"report {info['report_number']} saved as {info['file']}"]
+    except (KeyError, report.NotAnIncident, OSError, ValueError) as exc:
+        return [f"report not prepared: {_report_errors(exc).detail}"]
+
+
+@app.post("/api/approvals/{approval_id}/decide")
+async def decide_approval(approval_id: int, body: ApprovalDecisionIn, request: Request) -> dict[str, Any]:
+    """Admin only (see auth.POLICY). Approving carries the proposal out; rejecting just closes it. Both are logged."""
+    who = _actor(request, body.by)
+    item = approval_queue.decide(approval_id, body.approve, who, engine.now(), body.note)
+    if not item:
+        raise HTTPException(409, "this proposal does not exist or is no longer waiting for a decision")
+    actions = await _execute(item, who, _reporter(request, body.by)) if body.approve else []
+    verb = "approved" if body.approve else "rejected"
+    entry = _human_entry("APPROVAL_DECIDED", who, f"{who} {verb}: {item['label']} (proposal #{item['id']}, alert #{item['audit_id']})."
+                         + (f" Note: {body.note}" if body.note else ""),
+                         {"approval": item["id"], "action": item["action"], "decision": verb, "alert": item["audit_id"]},
+                         actions, severity="warning" if body.approve else "info")
+    await broadcast({"type": "audit", "entry": entry})
+    await broadcast({"type": "approvals", "items": approval_queue.list(engine.now())[-15:]})
+    return {"approval": item, "entry": entry}
 
 
 @app.get("/api/custody/{token}")
@@ -533,7 +903,7 @@ async def demo_get() -> dict[str, Any]:
 
 
 @app.post("/api/demo")
-async def demo_set(body: DemoMockIn) -> dict[str, Any]:
+async def demo_set(body: DemoMockIn, request: Request) -> dict[str, Any]:
     if not cfg.demo_enabled:
         raise HTTPException(403, "mock temperature is off; start the backend with --demo")
     before = engine.demo_state()
@@ -548,7 +918,8 @@ async def demo_set(body: DemoMockIn) -> dict[str, Any]:
             bits.append(f"set the MOCK light to {state['light_pct']:.0f} %" if body.light_mock and before["light_mock"] else
                         f"turned MOCK light on, set to {state['light_pct']:.0f} %" if body.light_mock else
                         "turned mock light off; the node reports its real light sensor again")
-        entry = _human_entry("DEMO_MODE", body.by, f"{body.by} {' and '.join(bits)}. Mock readings are labelled as mock.",
+        who = _actor(request, body.by)
+        entry = _human_entry("DEMO_MODE", who, f"{who} {' and '.join(bits)}. Mock readings are labelled as mock.",
                              {"mock": body.mock, "temp_c": state["temp_c"], "light_mock": body.light_mock,
                               "light_pct": state["light_pct"]}, [])
         await broadcast({"type": "audit", "entry": entry})
@@ -566,7 +937,7 @@ async def config() -> dict[str, Any]:
 
 @app.get("/api/health")
 async def health() -> dict[str, Any]:
-    return {"ok": True, "llm": explainer.enabled, "telegram": notifier.enabled}
+    return {"ok": True, "llm": explainer.enabled, "telegram": notifier.enabled, "auth": auth.enabled}
 
 
 @app.websocket("/ws")

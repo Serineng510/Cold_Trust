@@ -10,7 +10,7 @@ import time
 from dataclasses import dataclass
 from typing import Any
 
-from . import epcis, rules
+from . import epcis, rules, trust
 from .config import Settings
 from .rules import Sample
 from .schemas import IngestIn
@@ -32,7 +32,8 @@ MOVING_KMH = 8       # above this the truck counts as moving, and an authorised 
 STOPPED_KMH = 2      # below this the truck is standing still
 HISTORY_WINDOW_S = 6 * 3600
 REMINDER_S = 600  # unresolved problems are re-sent at most every 10 min
-DATA_TRUST_CODES = {"LIGHT_ZERO_VARIANCE", "DOOR_OPEN_NO_THERMAL_RESPONSE", "SENSOR_DISAGREEMENT"}
+DATA_TRUST_CODES = {"LIGHT_ZERO_VARIANCE", "DOOR_OPEN_NO_THERMAL_RESPONSE", "SENSOR_DISAGREEMENT",
+                    "HUMIDITY_NO_RESPONSE", "HUMIDITY_TEMP_MISMATCH"}
 
 
 @dataclass
@@ -140,6 +141,23 @@ class Engine:
                                     f"Door looks open >{cfg.door_open_contradiction_s:.0f}s in {cfg.ambient_c:.0f}°C "
                                     "ambient yet hold temperature has not moved (contradictory telemetry)"))
 
+        # Humidity as a second witness. Mocked readings (a demo temperature or light) break the physical link between the
+        # sensors, so the check is skipped while any mock is active and for one window after it.
+        if p.demo:
+            self.store.kv_set("mock_seen", {"t": latest.t, "sensors": list(p.demo_sensors or ["temp"])})
+        mock = self.store.kv_get("mock_seen", {})
+        mock_active = bool(mock) and latest.t - mock.get("t", 0) < cfg.door_open_contradiction_s
+        humidity = None if mock_active else rules.humidity_response(
+            history, cfg.light_bright_pct, cfg.door_open_contradiction_s, cfg.hum_move_pct)
+        if humidity == "both_flat":
+            findings.append(Finding("HUMIDITY_NO_RESPONSE", "warning",
+                                    f"Door open over {cfg.door_open_contradiction_s:.0f}s yet neither temperature nor "
+                                    "humidity moved (frozen or replayed readings?)"))
+        elif humidity == "hum_only":
+            findings.append(Finding("HUMIDITY_TEMP_MISMATCH", "warning",
+                                    "Humidity moved with the open door but the temperature did not; the sensors contradict "
+                                    "each other"))
+
         codes = {f.code for f in findings}
         cooling = step <= -cfg.step_change_c or any(latest.temp_c < pk["temp_min_c"] for pk in violating)
         # Door open at an authorised stop warms the hold: that is handling, not an alarm, for the first few minutes.
@@ -193,6 +211,11 @@ class Engine:
             if STATUS_ORDER[pk["status"]] > STATUS_ORDER[worst]:
                 worst = pk["status"]
 
+        seal = trust.build(
+            cfg, sig=p.sig, seq=p.seq, seq_state=seq_state, last_seq=dev.get("last_seq"), history=history, codes=codes,
+            humidity=humidity, simulated=list(mock.get("sensors", [])) if mock_active else [],
+            humidity_skip="mocked readings are in use, so the comparison would be meaningless (simulated)"
+            if mock_active else None)
         severity = max((f.severity for f in findings), key=lambda s: SEVERITY[s], default="info")
         if scenario == "THEFT_SUSPECTED":
             severity = "emergency"
@@ -214,6 +237,7 @@ class Engine:
                 "mocked": list((p.demo_sensors or ["temp"]) if p.demo else []),
             },
             "findings": [f.as_dict() for f in findings],
+            "seal": seal,
             "verdict": worst,
             "verdict_label": STATUS_LABEL[worst],
             "risk_score": max_risk,
@@ -554,7 +578,7 @@ class Engine:
             return "DOOR_AJAR"
         if thermal:
             return "FREEZE_RISK" if cooling else "THERMAL_EXCURSION"
-        if codes & {"LIGHT_ZERO_VARIANCE", "SENSOR_DISAGREEMENT"}:
+        if codes & {"LIGHT_ZERO_VARIANCE", "SENSOR_DISAGREEMENT", "HUMIDITY_NO_RESPONSE", "HUMIDITY_TEMP_MISMATCH"}:
             return "DATA_TRUST"
         return "NORMAL"
 

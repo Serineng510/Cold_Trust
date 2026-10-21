@@ -54,6 +54,12 @@ class ActorIn(BaseModel):
     by: str = Field(default="admin", min_length=1, max_length=60)
 
 
+class ApprovalDecisionIn(BaseModel):
+    approve: bool
+    note: str | None = Field(default=None, max_length=300)
+    by: str = Field(default="admin", min_length=1, max_length=60)
+
+
 class ReassignIn(BaseModel):
     truck: str = Field(min_length=3, max_length=40)
     reason: str = Field(min_length=3, max_length=300)
@@ -91,3 +97,8 @@ class CameraObservationIn(BaseModel):
 
 class MaintenanceIn(BaseModel):
     hours: int = Field(default=168, ge=1, le=168, description="How much history to review: 6, 24 or 168 (7 days)")
+
+
+class LoginIn(BaseModel):
+    company_id: str = Field(min_length=1, max_length=40, description="Company ID of the admin or driver account")
+    code: str = Field(min_length=1, max_length=200, description="The password that goes with that ID")

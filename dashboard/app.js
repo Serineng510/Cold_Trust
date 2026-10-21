@@ -14,7 +14,7 @@ const TONE = { NORMAL: 'ok', UNDER_REVIEW: 'warn', QUARANTINED: 'crit' };
 const PRIO = { Critical: 'crit', High: 'warn', Normal: 'info', Low: 'mut' };
 const SEV_TONE = { info: 'info', warning: 'warn', critical: 'crit', emergency: 'crit' };
 const ORDER = ['NORMAL', 'UNDER_REVIEW', 'QUARANTINED'];
-const HUMAN_KINDS = new Set(['ALERT_ACKNOWLEDGED', 'REPORT_APPROVED', 'REASSIGN_REQUESTED', 'VEHICLE_ACTION', 'SUPERVISOR_OVERRIDE', 'DEMO_MODE']);
+const HUMAN_KINDS = new Set(['ALERT_ACKNOWLEDGED', 'REPORT_APPROVED', 'REASSIGN_REQUESTED', 'VEHICLE_ACTION', 'SUPERVISOR_OVERRIDE', 'DEMO_MODE', 'APPROVAL_PROPOSED', 'APPROVAL_DECIDED', 'REPORT_GENERATED']);
 const TRUCKS = ['TX-2210-HX (idle, 61% full)', 'TX-7745-HX (loading, 30% full)'];
 const pill = (tone, text, dot = true) => `<span class="pill t-${tone}">${dot ? '<i></i>' : ''}${esc(text)}</span>`;
 const store = {
@@ -74,6 +74,7 @@ const camImg = new Image();
 camImg.alt = 'Live cargo-hold camera with person detection overlay';
 let camStarted = false;
 async function pollFeed() {
+  if (locked()) return;
   try {
     const f = await api('/api/camera/status');
     const changed = f.live !== D.feed.live || f.persons !== D.feed.persons || (f.labels || []).join() !== (D.feed.labels || []).join();
@@ -89,6 +90,11 @@ async function api(path, opts = {}) {
   const res = await fetch(path, { headers: { 'Content-Type': 'application/json' }, ...opts });
   let body = null;
   try { body = await res.json(); } catch { /* empty */ }
+  if (res.status === 401 && !path.startsWith('/api/login') && !path.startsWith('/api/me')) {
+    showLogin(AUTH.role ? 'Your session ended. Please sign in again.' : '');
+    throw new Error('Please sign in');
+  }
+  if (res.status === 403 && body && body.detail === 'admin only') throw new Error('Admin only: ask an admin to do this.');
   if (!res.ok) {
     const msg = body && body.detail ? (Array.isArray(body.detail) ? body.detail.map(d => d.msg).join('; ') : body.detail) : `HTTP ${res.status}`;
     throw new Error(msg);
@@ -97,7 +103,75 @@ async function api(path, opts = {}) {
 }
 const post = (path, data) => api(path, { method: 'POST', body: JSON.stringify(data) });
 
+/* ============================== login and roles ============================== */
+const AUTH = { auth: false, role: 'admin', name: null, id: null };      // open access until /api/me says a login is required
+const isAdmin = () => !AUTH.auth || AUTH.role === 'admin';
+const locked = () => document.body.classList.contains('locked');
+function showLogin(msg) {
+  document.body.classList.add('locked');
+  $('#login').hidden = false;
+  if (msg !== undefined) $('#loginErr').textContent = msg;
+  const n = $('#loginId');
+  if (n && !n.value) n.value = store.get('loginId', '');
+  setTimeout(() => ($('#loginId').value ? $('#loginCode') : $('#loginId')).focus(), 0);
+}
+function hideLogin() { document.body.classList.remove('locked'); $('#login').hidden = true; $('#loginCode').value = ''; }
+async function checkSession() {
+  try { const me = await api('/api/me'); if (me.auth && !me.role) showLogin('Your session ended. Please sign in again.'); } catch { /* backend down */ }
+}
+let started = false;
+async function startApp() {
+  try { Object.assign(AUTH, await api('/api/me')); } catch { /* backend down: loadAll shows the message */ }
+  if (AUTH.auth && !AUTH.role) { showLogin(); return; }
+  if (AUTH.auth && AUTH.name) S.me = AUTH.name;
+  hideLogin();
+  renderChrome();
+  loadAll();
+  if (!started) { started = true; connect(); }
+}
+async function doLogin() {
+  const company_id = $('#loginId').value.trim().toUpperCase(), code = $('#loginCode').value;
+  const btn = $('#loginBtn');
+  if (company_id.length < 3 || !code) { $('#loginErr').textContent = 'Enter your company ID and the password.'; return; }
+  btn.disabled = true; $('#loginErr').textContent = '';
+  try {
+    const r = await post('/api/login', { company_id, code });
+    store.set('loginId', r.id);
+    Object.assign(AUTH, { auth: true, role: r.role, name: r.name, id: r.id });
+    D.state = null; D.audit = [];
+    startApp();
+  } catch (err) {
+    $('#loginErr').textContent = err.message === 'wrong company ID or password' ? 'Wrong company ID or password.' : err.message;
+    $('#loginCode').value = ''; $('#loginCode').focus();
+  } finally { btn.disabled = false; }
+}
+async function doLogout() { try { await post('/api/logout', {}); } catch { /* already signed out */ } location.reload(); }
+
+/* Everything an admin does is switched off for a driver. The server refuses these too; this only makes it clear why. */
+const ADMIN_ONLY = ['[data-act="ovr-ok"]', '[data-act="ovs"]', '[data-act="reassign"]', '[data-act="reassign-ok"]',
+  '[data-act="vaction"][data-v="maintenance"]', '[data-act="vaction"][data-v="offline"]', '[data-act="speed"]',
+  '[data-act="maint-ai"]', '#ovr', '#rtruck'].join(',');
+function renderRole() {
+  const chip = $('#roleChip'), banner = $('#roleBanner');
+  chip.hidden = false;
+  if (!AUTH.auth) {
+    chip.className = 'chip rolechip open'; chip.textContent = 'Open access: no login';
+    chip.title = 'No passwords are set, so anyone who can reach this page can use every control.';
+  } else {
+    chip.className = 'chip rolechip ' + AUTH.role; chip.textContent = `${AUTH.name} · ${AUTH.role === 'admin' ? 'Admin' : 'Driver'}`;
+    chip.title = `${AUTH.id}: ` + (AUTH.role === 'admin' ? 'admin, full control' : 'driver, view, activate the route, acknowledge alerts');
+  }
+  $('#meRole').textContent = !AUTH.auth ? 'Open access' : AUTH.role === 'admin' ? 'Admin' : 'Driver';
+  banner.hidden = isAdmin();
+}
+function applyRoleLocks() {
+  const off = !isAdmin();
+  $$(ADMIN_ONLY).forEach(el => { el.disabled = off; el.classList.toggle('rolelock', off); if (off) el.title = 'Admin only'; else if (el.title === 'Admin only') el.removeAttribute('title'); });
+  if (off) ['#pop-mock', '#pop-mocklight'].forEach(id => { $(id).innerHTML = '<div class="note" style="padding:6px 4px">Mock controls are admin only.</div>'; });
+}
+
 async function loadAll() {
+  if (locked()) return;
   try {
     const [state, audit, readings, config] = await Promise.all([api('/api/state'), api('/api/audit?limit=400'), api('/api/readings?minutes=120'), api('/api/config')]);
     D.state = state; D.audit = audit; D.readings = readings; D.config = config; D.loaded = true;
@@ -137,16 +211,21 @@ let ws, wsRetry = 1000;
 function connect() {
   try { ws = new WebSocket(`${location.protocol === 'https:' ? 'wss' : 'ws'}://${location.host}/ws`); } catch { return setTimeout(connect, wsRetry); }
   ws.onopen = () => { D.connected = true; wsRetry = 1000; renderChrome(); loadAll(); };
-  ws.onclose = () => { D.connected = false; D.wsDropped = true; renderChrome(); setTimeout(connect, wsRetry); wsRetry = Math.min(wsRetry * 2, 15000); };
+  ws.onclose = () => { D.connected = false; D.wsDropped = true; renderChrome(); if (AUTH.auth) checkSession(); setTimeout(connect, wsRetry); wsRetry = Math.min(wsRetry * 2, 15000); };
   ws.onerror = () => ws.close();
   ws.onmessage = ev => {
     let m; try { m = JSON.parse(ev.data); } catch { return; }
     if (m.type === 'audit' || m.type === 'audit_update') {
       upsert(m.entry);
       if (m.type === 'audit') announce(m.entry);
+      if (m.type === 'audit' && m.entry.kind === 'REPORT_GENERATED' && isAdmin() && !S.toasted.has(m.entry.id)) {
+        S.toasted.add(m.entry.id);
+        toast('ok', 'Incident report ready', `${m.entry.params.report}${m.entry.params.automatic ? ' was prepared automatically' : ''}. Use Download report in the alert bar or Evidence → Incident reports.`);
+      }
       refreshState(); refreshReadings();
       render();
     } else if (m.type === 'vehicle' && D.state) { D.state.vehicle = m.vehicle; render(); }
+    else if (m.type === 'approvals' && D.state) { D.state.approvals = m.items; render(); }
     else if (m.type === 'demo' && D.state) { D.state.demo = { ...D.state.demo, ...m.demo }; renderChrome(); }
   };
 }
@@ -330,6 +409,25 @@ function climateCard() {
    <div class="row" style="margin-top:8px;font-size:12.5px"><span class="mut">Humidity <b class="tn" style="color:var(--fg)">${c.hum === null ? '-' : Math.round(c.hum) + '%'}</b></span><span class="mut">Trend <b class="tn" style="color:var(--fg)">${t && t.params.slope_c_per_min != null ? (t.params.slope_c_per_min > 0 ? '+' : '') + t.params.slope_c_per_min + ' °C/min' : '-'}</b></span><span class="mut">Last ping <b class="tn" style="color:var(--fg)">${t ? fmtTime(t.ts) : '-'}</b></span></div>
    <div class="note" style="margin-top:8px">DHT11 sampled every 5 s · logged every 30 s · routine ping every 15 min · event ping instant</div></div></div>`;
 }
+const APPR_DONE = { approved: ['ok', 'Approved'], rejected: ['mut', 'Rejected'], expired: ['mut', 'Expired'] };
+function approvalsCard() {
+  const items = ((D.state && D.state.approvals) || []).slice().reverse();
+  const waiting = items.filter(i => i.status === 'pending'), recent = items.filter(i => i.status !== 'pending').slice(0, 3);
+  const admin = isAdmin();
+  const wRow = i => `<div class="row" style="align-items:flex-start"><span><b>${esc(i.label)}</b><div class="note">${esc(i.reason)}</div><div class="note">Proposed by ${esc(i.source)} for ${esc(i.kind.replace(/_/g, ' ').toLowerCase())} · closes ${fmtTime(i.expires)}</div></span>
+    ${admin ? `<span style="display:flex;gap:6px"><button class="btn sm pri" data-act="appr-ok" data-v="${i.id}">Approve</button><button class="btn sm" data-act="appr-no" data-v="${i.id}">Reject</button></span>` : pill('warn', 'Waiting for admin', false)}</div>`;
+  const dRow = i => `<div class="row"><span>${esc(i.label)}<div class="note">${esc(APPR_DONE[i.status][1])}${i.decided_by && i.decided_by !== 'system' ? ' by ' + esc(i.decided_by) : ''} · ${fmtTime(i.decided_at)}</div></span>${pill(APPR_DONE[i.status][0], APPR_DONE[i.status][1], false)}</div>`;
+  return `<div class="card"><div class="h"><h3>Approvals</h3><span class="grow"></span>${waiting.length ? pill('warn', `${waiting.length} waiting`) : pill('mut', 'Nothing waiting', false)}</div>
+   <div class="b list">${waiting.map(wRow).join('') || '<div class="note">The agent proposes actions here after an alert. Nothing happens until an admin approves it.</div>'}${recent.length ? `<div class="note" style="margin-top:6px">Recently decided</div>${recent.map(dRow).join('')}` : ''}</div></div>`;
+}
+const SEAL_PILL = { CLEAN: 'ok', SUSPICIOUS: 'warn', NOT_TRUSTED: 'crit' };
+const CHECK_MARK = { pass: ['ok', 'passed'], warn: ['warn', 'suspicious'], fail: ['crit', 'failed'], skip: ['mut', 'not run'] };
+function trustCard() {
+  const e = [...D.audit].reverse().find(x => x.seal), s = e && e.seal;
+  const rows = s ? s.checks.map(c => `<div class="row"><span>${esc(c.name)}<div class="note">${esc(c.detail)}</div></span>${pill(CHECK_MARK[c.status][0], CHECK_MARK[c.status][1], c.status !== 'skip')}</div>`).join('') : '';
+  return `<div class="card"><div class="h"><h3>Data trust · Seal agent</h3><span class="grow"></span>${s ? pill(SEAL_PILL[s.result], s.result === 'CLEAN' ? 'No problems found' : s.result === 'SUSPICIOUS' ? 'Suspicious' : 'Not trusted') : pill('mut', 'Waiting for data', false)}</div>
+   <div class="b list">${s ? `<div class="note">${s.ran} of ${s.total} checks ran on the batch from ${fmtTime(e.ts)}${s.simulated && s.simulated.length ? ` · simulated ${esc(s.simulated.join(' + '))}` : ''}</div>${rows}` : '<div class="empty"><b>No readings yet</b>The checks run on every batch the sensor node sends.</div>'}</div></div>`;
+}
 function lastEvidence(around = null, windowS = 900) {
   const ev = D.audit.filter(e => e.kind === 'EVIDENCE_CAPTURED' && e.params && e.params.file);
   return around === null ? ev.slice(-1) : ev.filter(e => Math.abs(e.ts - around) <= windowS);
@@ -391,6 +489,9 @@ function lineHTML(e) {
   return `<div class="ln sev-${esc(e.severity)}"><span class="ts">${fmtTime(e.ts)}</span><span class="pt ${esc(e.ping_type)}">${esc(e.ping_type)}</span><span class="kind">${esc(e.kind)}</span> <span class="kv">${esc(paramsText(e))}</span>
     ${!quiet && e.findings && e.findings.length ? `<div class="sub"><i>findings</i>${esc(e.findings.map(f => `${f.code} (${f.severity})`).join(', '))}</div>` : ''}
     <div class="sub"><i>reasoning</i>${esc(e.reasoning)}${src}</div>
+    ${e.consulted ? `<div class="sub"><i>consulted</i>${esc(e.consulted)}</div>` : ''}
+    ${e.kind === 'REPORT_GENERATED' && e.params && e.params.file && isAdmin() ? `<div class="sub"><i>file</i><a href="/api/reports/${encodeURIComponent(e.params.file)}">Download ${esc(e.params.file)}</a></div>` : ''}
+    ${e.ai_rejected ? `<div class="sub"><i>ai check</i>${esc(e.ai_rejected)}</div>` : ''}
     ${e.product_impact ? `<div class="sub"><i>impact</i>${esc(e.product_impact)}</div>` : ''}
     ${acts.length ? `<div class="sub act"><i>action</i>${esc(acts.join(' | '))}</div>` : ''}
     ${!quiet && e.recommended_actions && e.recommended_actions.length ? `<div class="sub rec"><i>next</i>${esc(e.recommended_actions.join('; '))}</div>` : ''}</div>`;
@@ -407,7 +508,7 @@ function vOverview() {
      <div class="card"><div class="h"><h3>Operations map</h3><span class="grow"></span><span class="note">Live position, planned route and geofences</span></div>
        <div class="b"><div class="mapgrid">${overlay()}${mapBlock()}</div></div></div>
      ${termCard()}</div>
-   <div class="g start">${speedCard()}${climateCard()}${cameraCard()}${deliveryCard()}</div></div>`;
+   <div class="g start">${approvalsCard()}${speedCard()}${climateCard()}${trustCard()}${cameraCard()}${deliveryCard()}</div></div>`;
 }
 const matches = p => !S.q || [p.id, p.description, p.client, p.destination].some(x => String(x).toLowerCase().includes(S.q));
 function slot(p) {
@@ -479,6 +580,20 @@ function recoveries(rows, thr) {
 const MAINT_RANGES = [[6, '6 h'], [24, '24 h'], [168, '7 days']];
 const COOLING_TONE = { 'no sign of weakening': 'ok', 'possible weakening': 'warn', 'not enough data': 'info' };
 const URGENCY_TONE = { none: 'ok', monitor: 'info', 'service soon': 'warn' };
+/* After an AI review that finds the cooling unit may be failing: the temperature event(s) it covers can now be reported. */
+function reportOffers(ai) {
+  const offers = ai.report_offers || [];
+  if (!offers.length) return '';
+  const live = (D.state && D.state.approvals) || [];
+  const row = o => {
+    const r = reportFor(o.audit_id), waiting = live.some(i => i.id === o.id && i.status === 'pending');
+    const action = r ? (isAdmin() ? downloadBtn(r) : pill('ok', 'Report prepared', false))
+      : waiting ? (isAdmin() ? `<button class="btn sm pri" data-act="appr-ok" data-v="${o.id}">Approve incident report</button>` : pill('warn', 'Waiting for admin', false))
+      : pill('mut', 'Closed', false);
+    return `<div class="row"><span>${esc(o.kind.replace(/_/g, ' ').toLowerCase())} · alert #${o.audit_id}<div class="note">Offered because of this review. Nothing is prepared until an admin approves.</div></span>${action}</div>`;
+  };
+  return `<div style="display:grid;gap:8px;padding:10px 12px;border:1px solid var(--ok);border-radius:10px"><b>This review supports an incident report</b>${offers.map(row).join('')}</div>`;
+}
 function maintReview() {
   const m = D.maint, ai = D.maintAI, u = D.state && D.state.llm_usage;
   const seg = `<div class="seg" role="group" aria-label="Review period">${MAINT_RANGES.map(([h, t]) => `<button data-act="mrange" data-v="${h}" class="${S.mrange === h ? 'on' : ''}" aria-pressed="${S.mrange === h}">${t}</button>`).join('')}</div>`;
@@ -502,6 +617,7 @@ function maintReview() {
       ${sm.evidence.length ? `<div class="mut" style="font-size:12.5px">Evidence: ${sm.evidence.map(esc).join(' · ')}</div>` : ''}
       <ul style="margin:0;padding-left:18px">${sm.recommended_actions.map(a => `<li>${esc(a)}</li>`).join('')}</ul>
       ${ai.note ? `<div class="mut" style="font-size:12.5px">${esc(ai.note)}</div>` : ''}
+      ${reportOffers(ai)}
       <div class="mut" style="font-size:12px">An early-warning indicator from the sensor history, not a prediction.</div></div>`;
   }
   const paused = u && u.paused ? ` · AI paused: ${esc(u.paused)}` : '';
@@ -554,11 +670,31 @@ function placeText(p) {
   const zone = p.zone || 'Between stops';
   return p.lat !== undefined && p.lat !== null ? `${zone} · ${(+p.lat).toFixed(4)}, ${(+p.lon).toFixed(4)}` : zone;
 }
+/* Incident reports (admin). Suspicious person / theft: a draft is prepared automatically and waits here to be downloaded.
+   Temperature events: only after a maintenance review shows the cooling unit may be failing (the server decides). */
+const reportFor = id => [...D.audit].reverse().find(e => e.kind === 'REPORT_GENERATED' && e.params && e.params.incident === id);
+const downloadBtn = (r, label = 'Download report') => `<a class="btn sm pri" href="/api/reports/${encodeURIComponent(r.params.file)}" download>${label}</a>`;
+function reportsCard() {
+  if (!isAdmin()) return '';
+  const gates = (D.state && D.state.report_gates) || {};
+  const row = e => {
+    const r = reportFor(e.id), gate = gates[e.id];
+    const head = `<span><b>${esc(e.kind.replace(/_/g, ' '))}</b><div class="note">${fmtDateTime(e.ts)} · alert #${e.id}</div>`;
+    if (r) return `<div class="row">${head}<div class="note">${r.params.automatic ? 'Prepared automatically' : 'Prepared by ' + esc(r.params.by)} · ${esc(r.params.report)} · ${r.params.pictures} picture${r.params.pictures === 1 ? '' : 's'} · SHA-256 ${esc((r.params.sha256 || '').slice(0, 12))}…</div></span>
+      <span style="display:flex;gap:6px;flex-wrap:wrap">${downloadBtn(r)}<button class="btn sm" data-act="make-report" data-v="${e.id}" title="Makes a new version with you as the reporter">New version in my name</button></span></div>`;
+    if (gate && !gate.ok) return `<div class="row">${head}<div class="note">No report yet: ${esc(gate.reason)}</div></span><button class="btn sm" data-act="tab" data-v="maintenance">Open Maintenance</button></div>`;
+    return `<div class="row">${head}</span><button class="btn sm pri" data-act="make-report" data-v="${e.id}">Prepare incident report</button></div>`;
+  };
+  const rows = incidents().slice(0, 8).map(row).join('');
+  return `<div class="card" style="margin-bottom:14px"><div class="h"><h3>Incident reports</h3><span class="grow"></span><span class="chip">Word file from your template</span></div>
+   <div class="b list">${rows || '<div class="note">Reports appear here once an alert has been raised.</div>'}
+   <div class="note">Suspicious person and theft alerts get a draft report automatically. A temperature event only gets one when a maintenance review (Maintenance tab → Summarise with AI) finds the cooling unit may be failing. Every report is an AI-assisted draft: review and sign it before it is sent.</div></div></div>`;
+}
 /* Evidence: one row per picture the camera saved: time, location, what was detected. */
 function vEvidence() {
   const shots = D.audit.filter(e => e.kind === 'EVIDENCE_CAPTURED' && e.params && e.params.file).reverse();
-  if (!shots.length) return `<div class="empty"><b>No pictures yet</b>When the door opens or a person is detected, the camera saves a picture here with the time and location.</div>`;
-  return `<div class="card"><div class="h"><h3>Evidence</h3><span class="grow"></span><span class="chip">${shots.length} picture${shots.length > 1 ? 's' : ''}</span></div>
+  if (!shots.length) return reportsCard() + `<div class="empty"><b>No pictures yet</b>When the door opens or a person is detected, the camera saves a picture here with the time and location.</div>`;
+  return reportsCard() + `<div class="card"><div class="h"><h3>Evidence</h3><span class="grow"></span><span class="chip">${shots.length} picture${shots.length > 1 ? 's' : ''}</span></div>
    <div class="b"><div class="evlist">${shots.map(e => {
      const p = e.params, what = p.detected || e.trigger || 'Camera';
      const url = `/api/evidence/${encodeURIComponent(p.file)}`;
@@ -661,6 +797,7 @@ function renderMockPop(kind) {
     <div class="note">${d.enabled ? (on ? `The node reports this value instead of its ${m.noun} sensor. Readings are labelled as mock.` : `Unticked: the ${m.noun} comes from the sensor.`) : 'Mock data is off on this server. Start the backend with <span class="mono">--demo</span> to allow it.'}</div></div>`;
 }
 function renderChrome() {
+  renderRole();
   $('#connBanner').hidden = D.connected || !D.wsDropped;
   renderDemoBanner();
   $$('.rail button[data-act=tab]').forEach(b => b.classList.toggle('on', b.dataset.v === S.tab));
@@ -678,20 +815,17 @@ function renderChrome() {
   $('#crumbV').textContent = f.id; $('#vId').textContent = f.id;
   $('#vstat').innerHTML = pill(TONE[w], LABEL[w]);
   $('#vSub').textContent = `${f.model} · ${f.route.from} to ${f.route.to} · ${v.route_status || 'Idle'}`;
-  $('#ticker').innerHTML = al.length ? al.map(a => `<span class="a">${pill(SEV_TONE[a.severity], a.severity.toUpperCase(), false)}<b>${esc(a.kind.replace(/_/g, ' '))}</b><span class="mut">${esc(a.reasoning.slice(0, 90))}</span><button class="btn sm" data-act="ack" data-v="${a.id}">Acknowledge</button></span>`).join('')
+  $('#ticker').innerHTML = al.length ? al.map(a => `<span class="a">${pill(SEV_TONE[a.severity], a.severity.toUpperCase(), false)}<b>${esc(a.kind.replace(/_/g, ' '))}</b><span class="mut">${esc(a.reasoning.slice(0, 90))}</span><button class="btn sm" data-act="ack" data-v="${a.id}">Acknowledge</button>${isAdmin() && reportFor(a.id) ? downloadBtn(reportFor(a.id)) : ''}</span>`).join('')
     : `<span class="mut">No active alerts. Hold ${cl.temp === null ? '-' : cl.temp + ' °C'}, light ${cl.light === null ? '-' : Math.round(cl.light) + '%'}.</span>`;
   const b = $('#bellN'); b.hidden = !al.length; b.textContent = al.length;
   $('#tabs').innerHTML = TABS.map(([k, t]) => `<button role="tab" aria-selected="${S.tab === k}" class="${S.tab === k ? 'on' : ''}" data-act="tab" data-v="${k}">${t}${k === 'cargo' && c.QUARANTINED ? `<span class="c">${c.QUARANTINED}</span>` : k === 'evidence' && al.length ? `<span class="c">${al.length}</span>` : ''}</button>`).join('');
   const notified = D.audit.filter(e => e.notified).slice(-8).reverse();
   $('#pop-bell').innerHTML = `<div class="mut" style="padding:6px 10px;font-size:12px">Recent alerts</div>` + (notified.length ? notified.map(e => `<button class="it" data-act="inc-open" data-v="${e.id}"><span><b style="font-weight:600">${esc(e.kind.replace(/_/g, ' '))}</b><br><span class="mut" style="font-size:12px">${esc(e.reasoning.slice(0, 90))}</span></span><span class="mono dim">${fmtTime(e.ts)}</span></button>`).join('') : '<div class="it mut">Nothing yet.</div>');
-  const cfg = D.config || {};
-  $('#pop-profile').innerHTML = `<div class="it" style="display:grid;gap:6px"><label for="meInput" class="mut" style="font-size:12px">Your name (recorded on acknowledgements and overrides)</label><input id="meInput" class="field" value="${esc(S.me)}" maxlength="60"></div>
-    <div class="it" style="display:block"><div class="mut" style="font-size:12px;margin-bottom:6px">Monitoring settings (from the backend)</div><div class="mono" style="font-size:12px;line-height:1.8">log ${cfg.log_interval_s ?? '-'} s · routine ping ${cfg.routine_ping_s ? cfg.routine_ping_s / 60 + ' min' : '-'}<br>rate limit ${cfg.rate_c_per_min ?? '-'} °C/min · step ${cfg.step_c ?? '-'} °C<br>light alarm ≥ ${cfg.light_bright_pct ?? '-'}% · hold ${holdLimits().join('–')} °C<br>Claude: ${D.state.llm ? 'on' : 'off'} · Telegram: ${D.state.telegram ? 'on' : 'off'}</div></div>
+  $('#pop-profile').innerHTML = `${AUTH.auth ? `<div class="it" style="display:grid;gap:2px"><span class="mut" style="font-size:12px">Signed in (recorded in the audit log)</span><b>${esc(AUTH.name)}</b><span class="mut">${esc(AUTH.id)} · ${AUTH.role === 'admin' ? 'Admin: full control' : 'Driver: view, activate the route, acknowledge'}</span></div><button class="it" data-act="logout"><span>Sign out</span><span class="mut">ends this session</span></button>` : `<div class="it" style="display:grid;gap:6px"><label for="meInput" class="mut" style="font-size:12px">Your name (recorded on acknowledgements and overrides)</label><input id="meInput" class="field" value="${esc(S.me)}" maxlength="60"></div>`}
     <button class="it" data-act="voice"><span>Alarm sound + voice</span><span class="mut">${S.voice ? 'On' : 'Off'}</span></button>
-    <button class="it" data-act="theme"><span>Switch theme</span><span class="mut">Dark / light</span></button>
-    <a class="it" href="/api/epcis" download="coldtrust-trip.jsonld"><span>Export trip (GS1 EPCIS 2.0)</span><span class="mut">.jsonld</span></a>
-    <a class="it" href="/docs" target="_blank" rel="noopener"><span>API reference</span><span class="mut">/docs</span></a>`;
+    <button class="it" data-act="theme"><span>Switch theme</span><span class="mut">Dark / light</span></button>`;
   ['bell', 'profile', 'mock', 'mocklight'].forEach(k => { $('#pop-' + k).hidden = S.menu !== k; });
+  applyRoleLocks();
 }
 function renderView() {
   if (!D.state) return;
@@ -704,6 +838,7 @@ function renderView() {
   const slot = $('#camslot');
   if (slot) slot.appendChild(camImg);
   try { mountMap(); } catch (e) { console.error('map', e); }
+  applyRoleLocks();
   const t = $('#term');
   if (t) t.scrollTop = S.termStick ? t.scrollHeight : S.termTop;
 }
@@ -783,6 +918,7 @@ document.addEventListener('click', e => {
     const card = $('.pk.sel'); if (card) card.scrollIntoView({ block: 'nearest', behavior: matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth' });
   }
   else if (a === 'filter') { S.filter = v; renderView(); }
+  else if (a === 'logout') doLogout();
   else if (a === 'mrange') { S.mrange = +v; store.set('mrange', S.mrange); D.maint = null; D.maintAI = null; render(); loadMaint(); }
   else if (a === 'maint-ai') { if (!D.maintBusy) summariseMaint(); }
   else if (a === 'clearq') { S.q = ''; $('#q').value = ''; renderView(); }
@@ -792,6 +928,14 @@ document.addEventListener('click', e => {
   else if (a === 'voice') { S.voice = !S.voice; store.set('voice', S.voice); if (S.voice) { unlockAudio(); speak('Alarm sound on.'); } else { try { speechSynthesis.cancel(); } catch { /* none */ } } render(); }
   else if (a === 'menu') { S.menu = S.menu === v ? null : v; renderChrome(); }
   else if (a === 'theme') { const r = document.documentElement, dark = matchMedia('(prefers-color-scheme: dark)').matches; const curDark = r.dataset.theme ? r.dataset.theme === 'dark' : dark; r.dataset.theme = curDark ? 'light' : 'dark'; store.set('theme', r.dataset.theme); S.menu = null; render(); }
+  else if (a === 'make-report') act(() => post(`/api/incidents/${v}/report`, { by: S.me }), null);   // the live message announces it
+  else if (a === 'appr-ok' || a === 'appr-no') {
+    const item = ((D.state && D.state.approvals) || []).find(i => String(i.id) === v);
+    if (!item) return;
+    const yes = a === 'appr-ok';
+    if (yes && item.action !== 'PREPARE_REPORT' && !confirm(`${item.label}?\n\n${item.reason}\n\nThis is logged under your name.`)) return;
+    act(() => post(`/api/approvals/${v}/decide`, { approve: yes, by: S.me }), yes ? 'Approved' : 'Rejected', `${item.label} - recorded in the audit log.`);
+  }
   else if (a === 'ack') act(() => post(`/api/audit/${v}/ack`, { by: S.me }), 'Acknowledged', 'Recorded in the audit log.');
   else if (a === 'inc-open') { S.tab = 'evidence'; S.menu = null; render(); }
   else if (a === 'speed') act(() => post('/api/vehicle', { speed_kmh: +v }), null);
@@ -846,6 +990,6 @@ document.addEventListener('click', e => { if (!e.target.closest('.search')) qres
 
 /* ============================== boot ============================== */
 (() => { const t = store.get('theme', null); if (t) document.documentElement.dataset.theme = t; })();
+$('#loginForm').addEventListener('submit', e => { e.preventDefault(); doLogin(); });
 renderChrome();
-loadAll();
-connect();
+startApp();

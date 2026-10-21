@@ -267,3 +267,17 @@ input[type=range]{accent-color:var(--accent)}
 .simtag{font:700 10px var(--mono);letter-spacing:.6px;text-transform:uppercase;color:var(--warn);border:1px solid color-mix(in srgb,var(--warn) 50%,transparent);border-radius:5px;padding:0 5px;margin-left:2px}
 .banner.info{border-color:color-mix(in srgb,var(--info) 50%,transparent);background:color-mix(in srgb,var(--info) 10%,transparent)}
 .banner{margin-top:10px;border:1px solid color-mix(in srgb,var(--crit) 50%,transparent);background:color-mix(in srgb,var(--crit) 10%,transparent);border-radius:12px;padding:8px 12px;font-size:13px}
+
+
+/* login and roles */
+.login{position:fixed;inset:0;z-index:3000;display:grid;place-items:center;background:var(--bg);padding:16px}
+.login[hidden]{display:none}
+.logincard{width:min(420px,100%);background:var(--panel);border:1px solid var(--line);border-radius:16px;padding:24px;display:grid;gap:12px;box-shadow:var(--shadow)}
+.logincard h1{margin:0;font-size:22px}
+.logincard label{display:grid;gap:5px;font-size:12.5px;color:var(--mut)}
+.loginerr{min-height:1.3em;font-size:13px;color:var(--crit)}
+body.locked .app,body.locked .toast{display:none}
+.rolechip.admin{color:var(--ok);border-color:color-mix(in srgb,var(--ok) 45%,transparent)}
+.rolechip.driver{color:var(--info);border-color:color-mix(in srgb,var(--info) 45%,transparent)}
+.rolechip.open{background:var(--warn);color:#1b1300;border-color:transparent;font-weight:600}
+.rolelock,.rolelock:hover{opacity:.45;cursor:not-allowed}

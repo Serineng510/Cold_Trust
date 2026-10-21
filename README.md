@@ -42,6 +42,141 @@ falls back to a schematic SVG if Leaflet is missing). The route is real road geo
 running system makes no routing calls. Re-run `.venv\Scripts\python -m tools.fetch_route` after changing stops.
 OSM's tile servers and the OSRM demo server are for light use; do not point a large public deployment at them.
 
+## AI safeguards: number check and Telegram follow-up
+
+Every AI answer is checked before it is used: each number it quotes must appear in the data the agent was given
+(rounding is fine, new figures are not). An answer with an invented number is thrown away, the rule-based text stays, and
+the log shows "AI text rejected: ... not in the data".
+
+Telegram gets **one message per alert**: the AI agent's analysis, with the rules' status line ("[CRITICAL] THERMAL_EXCURSION
+(Gemini - Thermal agent)", the explanation, impact, next steps, "Status: UNDER REVIEW (SHP-...)"). The alert waits up to
+`COLDTRUST_TELEGRAM_AI_WAIT_S` seconds (default 5) for the AI text. If the AI is slow, off, paused or rejected by the number
+check, the rule-based text is sent instead, once. The dashboard log shows both: the rule text first, the AI text when it
+arrives. No extra AI call is used. `COLDTRUST_TELEGRAM_AI=0` always sends the rule-based text at once.
+
+## Data trust: the Seal agent's report
+
+Every accepted batch carries a trust report (stored on its log entry and shown on the Overview as "Data trust · Seal agent").
+It lists each integrity check with the evidence behind it: signature, sequence number, new readings, time window, light
+jitter, door versus temperature, second thermometer and the **humidity response**. Each check is *passed*, *suspicious*,
+*failed* or *not run* (and why: "second thermometer not fitted", "simulated"). The overall result is one of **no integrity
+problems found**, **suspicious** or **not trusted**.
+
+The humidity check uses humidity as a second witness: with the door open for 5 minutes, temperature and humidity should both
+move. Neither moving means frozen or replayed readings (not trusted); humidity moving while the temperature stays flat means
+the sensors contradict each other (suspicious); temperature moving alone is only noted, because the DHT11's humidity is
+coarse. While mock readings are active the check is skipped and the report says "simulated". The threshold
+(`COLDTRUST_HUM_MOVE_PCT`) has to be calibrated on the real node; until `COLDTRUST_HUM_CALIBRATED=1` the report says so.
+
+The report is built by the rules, with no extra AI call. The Thermal and Incident agents receive it with their input ("Consulted:
+Seal agent ..." appears under the log entry), and Telegram adds one "Data check" line only when the result is not clean.
+
+## Agent evaluation
+
+`python -m tools.eval_agents` plays 10 simulated scenarios (including a hidden-instruction attack) through the real engine and
+asks the agents 3 times each, once for the alert analysis and once for the report wording (60 calls, about 7 minutes, paced for
+the free tier). The raw answers are checked for invented numbers, actions outside the allowed list, wrong claims, unfit report
+wording, and obeying the injected text. Results are in `docs/agent_eval.md`; the checks themselves are unit-tested
+(`tests/test_eval.py`). Latest run: 60 of 60 calls answered, 0 invented numbers, 0 out-of-menu proposals, 0 injections obeyed.
+The first run also found two real faults that are now fixed: a runaway reply when the report wording was requested together
+with the proposals, and a stray control character that could corrupt a Word report. 60 answers is evidence, not a guarantee.
+
+## Approvals: the agent proposes, an admin decides
+
+After an alert the Incident agent can **propose** follow-up actions, and they wait in the Approvals card on the Overview.
+Nothing runs until an admin approves it; a driver sees the queue read-only.
+
+- **Fixed menu.** Four actions exist: quarantine the cargo, divert to the backup cold store, take the vehicle offline, prepare
+  the incident report. The AI's answer format only allows these four values.
+- **Rules limit the menu.** For each alert the rules work out which of the four make sense (for example nothing to quarantine
+  when everything already is) and hand that list to the agent as `allowed_actions`. Anything else it returns is dropped.
+  The agent's one-sentence reason goes through the same number check as every other AI text, and is shown, never run.
+- **No AI, no problem.** If the AI is off, paused or rejected, the rules queue a plain default proposal instead
+  (marked "rules" instead of the agent's name). Proposals ride in the same AI call as the analysis, so they cost nothing extra.
+- **Decisions are logged.** `POST /api/approvals/{id}/decide` is admin only and takes the name from the login, not from the
+  request. Approving runs the same code as the manual controls (quarantine = the package override, offline = the vehicle action;
+  divert sends one Telegram notice to the driver). Every proposal and decision is an entry in the audit log.
+- **Housekeeping.** A proposal nobody answers closes after 1 hour; the same one is not raised again for 10 minutes after
+  someone answered it. The Telegram alert adds "Awaiting admin approval: ..." when proposals are waiting.
+- The automatic quarantine on suspected theft stays as it is: the rules act at once, the queue is for what needs a person.
+
+## Incident report from your Word template
+
+The backend fills `templates/logistics-incident-report.docx` and saves it under `data/reports/` as
+`INC-<date>-<alert number>.docx` (a later version makes `-r2`, never overwriting). Admin only: `POST /api/incidents/{id}/report`,
+`GET /api/reports/{file}`. Who gets a report, and when, depends on the kind of event:
+
+- **Suspicious person and suspected theft: prepared automatically.** About 15 seconds after the alert (so the camera has
+  uploaded its pictures) a draft is made with "ColdTrust system (automatic draft)" as the reporter, at most once per 30
+  minutes per kind of alert. A **Download report** button appears next to the alert in the top bar and under Evidence →
+  Incident reports (admin only), and a message announces it. **New version in my name** makes another file naming the admin
+  who pressed it.
+- **Temperature events (too warm, too cold): only after a maintenance review supports it.** A freeze risk or a temperature
+  rise on its own is not an incident report. In Maintenance, **Summarise with AI** must have run on enough history, been
+  written by the AI (not the rule-based fallback), found the cooling unit "possible weakening", and cover the time of the
+  event. Until then the button is replaced by the reason and a link to Maintenance, the API answers 409 with the same reason,
+  and the agents do not propose "prepare report". When the review does qualify, "Prepare the incident report" is queued for the
+  latest temperature event of each kind that has no report yet. It appears under the review with an **Approve incident report**
+  button (and in the Approvals card); nothing is prepared until an admin approves, and the report then quotes the review.
+- Other alerts (door opened outside a stop, tampered data) are prepared by pressing **Prepare incident report**, or by
+  approving the proposal, and name whoever pressed it.
+
+- **Facts come from the records, not the AI:** time and place (UTC+08:00), vehicle and route, the driver and the admin
+  with their contact info (`COLDTRUST_ADMIN_CONTACT`, `COLDTRUST_DRIVER_CONTACT` in `.env`), the cargo and how long it was
+  outside its limits, the actions taken (from the audit log), the Seal agent's data check, the GS1 EPCIS event IDs.
+- **The reporter is whoever pressed the button**, read from their login, not typed in (an automatic draft names the system instead and says no person has reviewed it).
+- **Pictures:** the evidence photos taken within 15 minutes of the alert (up to 4) are embedded in the report, each with its
+  time, what was detected, file name and SHA-256. A photo whose file no longer matches the SHA-256 logged at capture is still
+  shown but flagged "WARNING: the file differs...".
+- **AI wording, only where safe:** when the report is prepared, one small AI call writes the description and the suspected
+  cause (kept out of the alert call because together they made the Incident agent's reply run away; see the evaluation). The
+  wording is number-checked, limited to a few sentences and checked for talk about its own instructions. If the call fails or
+  the text is unfit, a rule-based sentence is used and the report says so.
+- **Left to a person:** cargo damage ("not determined: a physical inspection is needed", with the exposure figures), vehicle
+  damage, injuries and the signatures. The report says it is an AI-assisted draft that a person must review. A report made
+  from mock readings carries a "DEMO DATA" note.
+- **Tamper evidence:** the file's SHA-256 is written to the audit log (`REPORT_GENERATED`).
+- **Editing the template:** change the wording or layout in Word, keep the `{tags}`, then run
+  `python -m tools.check_report_template`. The picture slot is `{%image}` inside `{#photos}...{/photos}`; if you start again
+  from your original file, `python -m tools.add_photo_slot` puts it back.
+
+## Login and roles
+
+Give each role a company ID and a password in `.env` (passwords at least 8 characters, IDs and passwords different from each
+other) and the dashboard asks for the company ID and the code before it shows anything:
+
+```
+COLDTRUST_ADMIN_ID=ADM-1001
+COLDTRUST_ADMIN_NAME=Serine Ng
+COLDTRUST_ADMIN_CODE=choose-your-own-admin-code
+COLDTRUST_DRIVER_ID=DRV-20418
+COLDTRUST_DRIVER_NAME=Marcus Lee
+COLDTRUST_DRIVER_CODE=choose-your-own-driver-code
+```
+
+The ID is not a secret (the driver's ID is the one shown on the dashboard); the code is. `NAME` is optional and is what the
+audit log shows next to each action (it defaults to the ID). Typing the ID in lower case or with spaces is fine.
+
+| | Admin | Driver |
+|---|---|---|
+| Look at everything (dashboard, map, logs, camera, evidence pictures, maintenance ranges) | yes | yes |
+| Acknowledge alerts, activate the route | yes | yes |
+| Quarantine / release / reassign packages, vehicle offline or maintenance, mock chips, the speed card, AI maintenance summary, EPCIS export, API reference | yes | no (buttons are greyed out and the server answers 403) |
+
+- **Identity comes from the login.** The name next to every action in the audit log is the account's name, company ID and
+  role ("Marcus Lee (DRV-20418, driver)"), never what a request claims. Sessions last 12 hours, are signed, HttpOnly and SameSite=Strict, and are cancelled by Sign out.
+- **Guessing is limited.** 5 wrong passwords lock that address out for 5 minutes (even for the right password). Each failure is
+  logged (`LOGIN_FAILED`, without the code) and the lockout sends a Telegram warning.
+- **Devices keep their own key.** The board's signed messages, the camera agent and the simulator use `X-ColdTrust-Key`,
+  which allows only their narrow jobs (and never makes anyone an admin).
+- **Public on purpose:** the page itself (it shows the login), `/api/health`, the board's `GET /api/demo` poll, signed
+  telemetry, and `GET /api/custody/{token}` for a receiving scanner.
+- **No accounts set = open access,** exactly as before, with an amber "Open access: no login" chip. Set the passwords before
+  sharing the dashboard with anyone.
+- **Honest limits:** one account per role (a company ID and code each), not one per person; over plain HTTP the cookie is not encrypted (a
+  tunnel link is https and the cookie is then marked Secure); sessions live in the signed cookie, so a restart does not end
+  them but changing a code does.
+
 ## Maintenance review
 
 The Maintenance tab has a **Maintenance review** card: choose the last 6 h, 24 h or 7 days (longer periods are summarised per
@@ -68,6 +203,9 @@ Use a real (official) database for a weekly view: the demo database is wiped at 
 | `COLDTRUST_DB` / `COLDTRUST_EVIDENCE_DIR` | `data/...` | Storage locations |
 | `COLDTRUST_SILENT_AFTER_S` / `COLDTRUST_GPS_STALE_S` | `1800` / `600` | Watchdog thresholds |
 | `COLDTRUST_TEMP_CROSSCHECK_C` | `3` | Allowed gap between the two thermometers |
+| `COLDTRUST_HUM_MOVE_PCT` / `COLDTRUST_HUM_CALIBRATED` | `3` / `0` | Smallest humidity change (%RH) that counts as "moved" in the humidity check, and whether it has been calibrated on the hardware |
+| `COLDTRUST_ADMIN_CONTACT` / `COLDTRUST_DRIVER_CONTACT` | empty | Phone or email printed in the incident report |
+| `COLDTRUST_REPORTS_DIR` / `COLDTRUST_REPORT_TEMPLATE` | `data/reports` / `templates/logistics-incident-report.docx` | Where reports are saved, and the template used |
 | `COLDTRUST_TZ_OFFSET` | `+08:00` | Local offset written into EPCIS events (demo route is Malaysia) |
 
 ## API

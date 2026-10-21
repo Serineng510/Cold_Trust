@@ -60,6 +60,10 @@ class Settings:
     zero_variance_min_samples: int = int(_float("COLDTRUST_ZV_MIN", 20))
 
     temp_cross_check_c: float = _float("COLDTRUST_TEMP_CROSSCHECK_C", 3.0)  # max gap between the two thermometers
+    # Humidity as a second witness to an open door: smallest change (%RH) that counts as "moved". Not yet calibrated on the
+    # hardware; the Seal report says so until COLDTRUST_HUM_CALIBRATED=1.
+    hum_move_pct: float = _float("COLDTRUST_HUM_MOVE_PCT", 3.0)
+    hum_calibrated: bool = _bool("COLDTRUST_HUM_CALIBRATED", False)
 
     # Watchdog (CISA: have a response plan "if temperature does not hold or connectivity is lost")
     silent_after_s: float = _float("COLDTRUST_SILENT_AFTER_S", 1800)  # 2 missed 15-min routine pings
@@ -74,6 +78,21 @@ class Settings:
 
     # Demo helpers
     budget_scale: float = _float("COLDTRUST_BUDGET_SCALE", 1.0)  # <1 shrinks excursion budgets for demos
+
+    # Login (see backend/auth.py). No admin code = open access, exactly as before, with a warning on the dashboard.
+    admin_id: str = os.getenv("COLDTRUST_ADMIN_ID", "")        # company ID used to sign in
+    admin_name: str = os.getenv("COLDTRUST_ADMIN_NAME", "")    # shown in the audit log (defaults to the ID)
+    admin_code: str = os.getenv("COLDTRUST_ADMIN_CODE", "")
+    driver_id: str = os.getenv("COLDTRUST_DRIVER_ID", "")
+    driver_name: str = os.getenv("COLDTRUST_DRIVER_NAME", "")
+    driver_code: str = os.getenv("COLDTRUST_DRIVER_CODE", "")
+    # Phone or email printed in the "Contact Info" column of the incident report (not used for anything else).
+    admin_contact: str = os.getenv("COLDTRUST_ADMIN_CONTACT", "")
+    driver_contact: str = os.getenv("COLDTRUST_DRIVER_CONTACT", "")
+    reports_dir: str = os.getenv("COLDTRUST_REPORTS_DIR", "data/reports")
+    report_template: str = os.getenv("COLDTRUST_REPORT_TEMPLATE", "templates/logistics-incident-report.docx")
+    session_hours: float = _float("COLDTRUST_SESSION_HOURS", 12)
+    session_secret: str = os.getenv("COLDTRUST_SESSION_SECRET", "")  # optional; derived from the codes and device key otherwise
 
     # LLM
     llm_mode: str = os.getenv("COLDTRUST_LLM", "auto")  # auto: only if an API key is set | on | off
@@ -90,6 +109,9 @@ class Settings:
 
     # Telegram (optional)
     telegram_token: str = os.getenv("TELEGRAM_BOT_TOKEN", "")
+    # One Telegram message per alert: the AI agent's analysis when it is ready, else the rule-based text (never both)
+    telegram_ai: bool = _bool("COLDTRUST_TELEGRAM_AI", True)
+    telegram_ai_wait_s: float = _float("COLDTRUST_TELEGRAM_AI_WAIT_S", 5.0)  # how long an alert waits for the AI text
     telegram_chat_ids: tuple[str, ...] = tuple(
         c.strip() for c in os.getenv("TELEGRAM_CHAT_IDS", "").split(",") if c.strip()
     )

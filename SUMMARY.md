@@ -123,7 +123,7 @@ step size. Wi-Fi, server address and device key live in `firmware/secrets.h` (gi
 | Situation | Verdict | Effect |
 |---|---|---|
 | Light + person seen by the camera, outside an authorised stop | **THEFT SUSPECTED** | all packages quarantined, tokens revoked |
-| **Light while stopped (0 mph) on an active route, outside an authorised stop** (new 18 Oct) | **THEFT SUSPECTED** | same |
+| **Light while stopped (0 km/h) on an active route, outside an authorised stop** (new 18 Oct) | **THEFT SUSPECTED** | same |
 | Light while the temperature does not react for 5 min in hot weather | SPOOF SUSPECTED | under review |
 | Light at an authorised depot or dock | Authorised handling | logged only |
 | Light anywhere else (e.g. driving with the door open) | DOOR AJAR | under review |
@@ -175,9 +175,9 @@ current; theft stays until someone acknowledges it.
 
 | Tab | Contents |
 |---|---|
-| **Overview** | Map (route, geofences, truck), telemetry strip (speed and fuel gauges, driver, progress, alerts), **Vehicle speed card** (new: gauge + Stop / 30 / 60 mph demo buttons + the stopped-on-route rule), cargo climate gauges, **live camera** with the pose overlay, alert delivery status, agent reasoning and audit log |
+| **Overview** | Map (route, geofences, truck), telemetry strip (speed and fuel gauges, driver, progress, alerts), **Vehicle speed card** (new: gauge + Stop / 50 / 90 km/h demo buttons + the stopped-on-route rule), cargo climate gauges, **live camera** with the pose overlay, alert delivery status, agent reasoning and audit log |
 | **Cargo** | Weight / volume / cleared bars, hold grid by loading order, package list and detail: limits, excursion budget, risk, custody token, simulated receiving scan, reassign to another truck, supervisor override |
-| **Maintenance** | Time in range, peak, trend, time to limit, recovery time after each door opening, early-warning list |
+| **Maintenance** | **Maintenance review** card on top: pick 6 h / 24 h / 7 days (shown per day), time in range, peak, door openings, average recovery and its trend, early-warning list, and a **Summarise with AI** button (Thermal agent, one free call per press, cached 10 min, rule-based fallback). Below it: the 6-hour charts, time to limit, recovery after each door opening |
 | **Route** | Larger map, stops and zones marked passed / here / ahead |
 | **Evidence** (new 18 Oct) | Simple list: **picture, time, location, what was detected**; click a picture for full size |
 
@@ -282,7 +282,8 @@ therefore **mock the temperature and the light**, and it is never hidden:
 | `backend/epcis.py` | GS1 EPCIS 2.0 records and hash IDs |
 | `backend/notify.py`, `telegram_setup.py` | Telegram messages and photos; setup helper |
 | `backend/seed.py` | Truck, packages, route, geofences, backup cold store |
-| `backend/llm.py`, `gemini_check.py` | The three AI agents (Gemini or Claude), frame analysis, key check |
+| `backend/llm.py`, `gemini_check.py` | The three AI agents (Gemini or Claude), frame analysis, key check, shared free-tier limit guard |
+| `backend/maintenance.py` | Maintenance review: recovery after door openings, per-day summary, early-warning indicators, rule-based fallback |
 | `tools/fetch_route.py`, `backend/route_data.py` | OSRM road route for the map (fetched once) |
 | `dashboard/` | `index.html`, `app.js`, `styles.css` (`mockup.html` = the original design mockup) |
 | `camera/` | `cam_test.py`, `camera_agent.py`, `pose.py` |
