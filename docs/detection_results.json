@@ -1,0 +1,136 @@
+{
+ "summary": {
+  "false_alarms_baseline": 1,
+  "false_alarms_coldtrust": 0,
+  "attacks_total": 3,
+  "attacks_caught_coldtrust": 3,
+  "incidents": 5,
+  "held_baseline": 0,
+  "held_coldtrust": 5,
+  "earlier": {
+   "compressor_fail": 660
+  }
+ },
+ "scenarios": [
+  {
+   "scenario": "normal",
+   "baseline_first_s": null,
+   "baseline_alarms": 0,
+   "cold_first_s": null,
+   "cold_kind": null,
+   "temp_at_first_alert": null,
+   "cold_alerts": 0,
+   "held_at_first_alert": 0,
+   "untrusted_caught_s": null,
+   "packages": 10
+  },
+  {
+   "scenario": "door_ajar",
+   "baseline_first_s": 205,
+   "baseline_alarms": 5,
+   "cold_first_s": 205,
+   "cold_kind": "DOOR_AJAR",
+   "temp_at_first_alert": 3.0,
+   "cold_alerts": 2,
+   "held_at_first_alert": 10,
+   "untrusted_caught_s": null,
+   "packages": 10
+  },
+  {
+   "scenario": "theft",
+   "baseline_first_s": 205,
+   "baseline_alarms": 1,
+   "cold_first_s": 205,
+   "cold_kind": "THEFT_SUSPECTED",
+   "temp_at_first_alert": 3.0,
+   "cold_alerts": 1,
+   "held_at_first_alert": 10,
+   "untrusted_caught_s": null,
+   "packages": 10
+  },
+  {
+   "scenario": "authorised_stop",
+   "baseline_first_s": 135,
+   "baseline_alarms": 1,
+   "cold_first_s": null,
+   "cold_kind": null,
+   "temp_at_first_alert": null,
+   "cold_alerts": 0,
+   "held_at_first_alert": 0,
+   "untrusted_caught_s": null,
+   "packages": 10
+  },
+  {
+   "scenario": "compressor_fail",
+   "baseline_first_s": 1140,
+   "baseline_alarms": 27,
+   "cold_first_s": 480,
+   "cold_kind": "THERMAL_EXCURSION",
+   "temp_at_first_alert": 5.0,
+   "cold_alerts": 5,
+   "held_at_first_alert": 10,
+   "untrusted_caught_s": null,
+   "packages": 10
+  },
+  {
+   "scenario": "freeze",
+   "baseline_first_s": 190,
+   "baseline_alarms": 1,
+   "cold_first_s": 190,
+   "cold_kind": "FREEZE_RISK",
+   "temp_at_first_alert": 0.0,
+   "cold_alerts": 1,
+   "held_at_first_alert": 10,
+   "untrusted_caught_s": null,
+   "packages": 10
+  },
+  {
+   "scenario": "replay",
+   "baseline_first_s": null,
+   "baseline_alarms": 0,
+   "cold_first_s": 190,
+   "cold_kind": "REJECTED_REPLAY_SEQUENCE",
+   "temp_at_first_alert": null,
+   "cold_alerts": 1,
+   "held_at_first_alert": 0,
+   "untrusted_caught_s": 190,
+   "packages": 10
+  },
+  {
+   "scenario": "spoof",
+   "baseline_first_s": 120,
+   "baseline_alarms": 8,
+   "cold_first_s": 120,
+   "cold_kind": "DOOR_AJAR",
+   "temp_at_first_alert": 3.0,
+   "cold_alerts": 2,
+   "held_at_first_alert": 10,
+   "untrusted_caught_s": 420,
+   "packages": 10
+  },
+  {
+   "scenario": "sensor_disagree",
+   "baseline_first_s": null,
+   "baseline_alarms": 0,
+   "cold_first_s": 240,
+   "cold_kind": "DATA_TRUST",
+   "temp_at_first_alert": 3.0,
+   "cold_alerts": 1,
+   "held_at_first_alert": 0,
+   "untrusted_caught_s": 240,
+   "packages": 10
+  },
+  {
+   "scenario": "stopped_theft",
+   "baseline_first_s": 155,
+   "baseline_alarms": 1,
+   "cold_first_s": 155,
+   "cold_kind": "THEFT_SUSPECTED",
+   "temp_at_first_alert": 3.0,
+   "cold_alerts": 1,
+   "held_at_first_alert": 10,
+   "untrusted_caught_s": null,
+   "packages": 10
+  }
+ ]
+}

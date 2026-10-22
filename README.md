@@ -71,6 +71,14 @@ coarse. While mock readings are active the check is skipped and the report says 
 The report is built by the rules, with no extra AI call. The Thermal and Incident agents receive it with their input ("Consulted:
 Seal agent ..." appears under the log entry), and Telegram adds one "Data check" line only when the result is not clean.
 
+## Measured benefit
+
+`python -m tools.eval_detection` feeds the same 10 simulated scenarios to ColdTrust and to a plain threshold alarm (rings the instant
+a reading leaves 2-8 C or the door opens) and writes `docs/detection_results.md`. On those scenarios: false alarms 1 vs 0; data attacks
+recognised 0 of 3 vs 3 of 3; cargo already held at the first alert in 5 of 5 incidents vs 0; a slow cooling failure alerted 11 minutes
+earlier (each product is judged against its own limits). On sudden events both are equally fast. `tests/test_detection.py` fails if any
+of these stops being true. They are simulated scenarios, not field data.
+
 ## Agent evaluation
 
 `python -m tools.eval_agents` plays 10 simulated scenarios (including a hidden-instruction attack) through the real engine and
