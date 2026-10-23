@@ -1,12 +1,45 @@
-# Frozen_Warden
+# ColdTrust
 
-**ColdTrust**: cold-chain integrity agent (prototype).
+**An AI-assisted cold-chain guardian that checks its own sensor data before it acts** (prototype for HackAI Track 02,
+Secure Logistics & Digital Trust, Direction 2). Its Telegram bot is called **Frozen Warden**.
 
-ESP8266 + DHT11 + light module send signed telemetry to a FastAPI backend. Deterministic rules decide *whether*
-something is wrong; Claude explains *what it means for the product*. Status changes (quarantine, custody-token
-revocation) are made by code, never by the model. Full design: [PLAN.md](PLAN.md).
+An ESP8266 node (DHT11 + light module) and a camera send signed readings to a FastAPI backend. Ordinary rules decide whether
+something is wrong and quarantine compromised cargo; three Gemini agents (Thermal, Seal, Incident) explain the risk and the
+Incident agent proposes actions from a fixed menu, which only an admin can approve. Status changes are made by code, never
+by the model. Full design: [PLAN.md](PLAN.md). Diagrams: [docs/diagrams](docs/diagrams).
 
-## Run
+## Quick start (about 3 minutes, no hardware, no accounts, no API key)
+
+Needs Python 3.10 or newer (tested on 3.10). On Windows use `.venv\Scripts\python`; on Linux or macOS use `.venv/bin/python`.
+
+```bash
+git clone https://github.com/Serineng510/Frozen_Warden.git
+cd Frozen_Warden
+python -m venv .venv
+.venv\Scripts\python -m pip install -r requirements-demo.txt
+.venv\Scripts\python -m backend --timelapse --reset --no-telegram
+```
+
+Open **http://127.0.0.1:8000**. In this mode there is no login (the dashboard shows an amber "Open access" chip). Then, in a
+**second terminal** in the same folder, play a scenario:
+
+```bash
+.venv\Scripts\python -m sim.sim spoof --timelapse     # door "open" 7 min, temperature perfectly flat -> "Not trusted"
+```
+
+Stop the server (Ctrl+C) and start it again with `--reset` before the next scenario, then try `theft`, `door_ajar`,
+`compressor_fail`, `authorised_stop` or `replay` (`.venv\Scripts\python -m sim.sim --list` shows all ten).
+
+What to look at on the **Overview**: the **Data trust** card (each integrity check passed / suspicious / failed / not run),
+the **audit log** (what the rules decided and why), and the **Approvals** card (what the agent proposes; an admin approves).
+
+- **The AI agents are off** until you add a free Gemini key (see "Set up the AI agents" below); without one the same screens show the
+  rules' own plain-language text. Telegram is off with `--no-telegram`.
+- The simulator is the only data source here. The real hardware path is in `firmware/` and `RUNBOOK.md`.
+- To run the tests, camera or the full feature set, install the full list instead: `pip install -r requirements.txt`
+  (adds OpenCV and MediaPipe, a few hundred MB), then `.venv\Scripts\python -m pytest -q`.
+
+## Run (full install)
 
 ```bash
 python -m venv .venv
@@ -25,6 +58,71 @@ testing so simulator runs do not message your Telegram group.
   hardware: it disables the timestamp-window replay check.
 * Use `--reset` between scenarios for a clean demo; scenarios run back to back share excursion history.
 * To test a real-time run, start the server without `--timelapse` and run the simulator without it too (~3-9 min per scenario).
+
+## Set up the AI agents (Gemini, or another model)
+
+The three agents (Thermal, Seal, Incident) are optional. Without a key everything still works and the screens show the rules' own
+text; with a key each alert also gets an AI explanation, and the Incident agent adds proposals for the admin to approve.
+
+**Gemini (free tier), step by step**
+
+1. Create a key at <https://aistudio.google.com/apikey> (the free tier needs only a Google account; check Google's current terms).
+2. In the project folder copy the example settings file, then open `.env` and fill in one line. `.env` is git-ignored: never commit it.
+   ```bash
+   copy .env.example .env            # Linux/macOS: cp .env.example .env
+   ```
+   ```
+   GEMINI_API_KEY=paste-your-key-here
+   ```
+3. Check the key (it lists the models your key can use and sends one tiny request through each of the three agents; it never prints the key):
+   ```bash
+   .venv\Scripts\python -m backend.gemini_check
+   ```
+   You want `[ok]` / `[PASS]` for each agent. `[FAIL]` messages say what to fix (wrong key, no quota, unknown model).
+4. Restart the backend. The dashboard's **Alert delivery** card now reads "AI agents · Gemini (...)" with today's call count,
+   and the audit log tags each explanation, for example "Gemini · Thermal agent".
+
+Good to know:
+- **The app stays inside the free limits by itself:** it uses at most 60 % of the per-minute and 80 % of the per-day allowance
+  (counted in `data/gemini_usage.json`, shared by every program). If a limit is hit or Google answers 429, the rule-based text is
+  used and the AI pauses for 10 minutes. Change the model with `GEMINI_MODEL` (default `gemini-3.5-flash-lite`).
+- **Privacy:** the free tier lets Google use submitted content. Only reading summaries are sent; camera frames stay local unless
+  you set `COLDTRUST_VISION=on`. Use synthetic or demo data with a free key.
+- **Turn the AI off** at any time with `COLDTRUST_LLM=off`.
+
+**Claude instead of Gemini**
+
+Claude is implemented but needs a paid Anthropic key, and it has not been tested live in the final version. Install the SDK (it is
+in `requirements.txt`, not in `requirements-demo.txt`: `pip install anthropic`), then in `.env`:
+
+```
+ANTHROPIC_API_KEY=your-key
+COLDTRUST_LLM_PROVIDER=anthropic
+# COLDTRUST_MODEL=claude-opus-5-5
+```
+
+The free-tier guard only counts Gemini calls, so watch your own spending.
+
+**Another model (OpenAI, a local model, and so on)**
+
+Not supported out of the box. Every AI call goes through one function, `Explainer._ask` in `backend/llm.py`, which calls
+`_ask_gemini` or `_ask_anthropic` with the same three inputs: the system prompt, the data, and a JSON schema, and expects JSON
+text back. To add a provider, write one more function with that shape and select it in `Explainer.__init__`. The safeguards (the
+number check, the fixed action menu, the rule-based fallback) sit outside that function, so they apply to any provider.
+
+## Set up Telegram alerts (the Frozen Warden bot)
+
+Optional: one Telegram message per alert (the AI analysis, or the rule text if the AI is late) to the driver and admin.
+
+1. In Telegram, open **@BotFather**, send `/newbot`, name it **Frozen Warden** and copy the token it gives you.
+2. Put the token in `.env`: `TELEGRAM_BOT_TOKEN=...` (never share it or commit it).
+3. Add the bot to your group, or open a chat with it, and send any message (for example `/start`).
+4. Find the chat ID and test it:
+   ```bash
+   .venv\Scripts\python -m backend.telegram_setup chats    # lists the chats; put the IDs in .env as TELEGRAM_CHAT_IDS=id1,id2
+   .venv\Scripts\python -m backend.telegram_setup test     # sends a test alert
+   ```
+5. Start the backend without `--no-telegram`. While you test with the simulator, keep `--no-telegram` so it does not message your group.
 
 ## AI agents (Gemini) and the map (open source)
 

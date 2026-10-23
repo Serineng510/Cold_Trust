@@ -1,0 +1,5 @@
+# Lightweight install to run the dashboard and the simulator (no camera, no tests). See "Quick start" in README.md.
+fastapi>=0.110
+uvicorn[standard]>=0.29
+pydantic>=2.6
+httpx>=0.27
