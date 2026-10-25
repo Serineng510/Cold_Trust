@@ -24,6 +24,8 @@ def main() -> None:
     ap.add_argument("--demo", action="store_true",
                     help="enable the dashboard's simulated-temperature controls (for demos; readings stay labelled)")
     ap.add_argument("--db", help="database file (default data/coldtrust.db); give each running server its own")
+    ap.add_argument("--no-login", action="store_true",
+                    help="open access, no sign-in, even if cold-chain/.env sets passwords (for the judge demo on your own PC)")
     a = ap.parse_args()
 
     if a.timelapse:
@@ -32,6 +34,9 @@ def main() -> None:
         os.environ["COLDTRUST_DEMO"] = "1"
     if a.no_telegram:  # an empty value wins over cold-chain/.env
         os.environ["TELEGRAM_BOT_TOKEN"] = ""
+    if a.no_login:     # likewise: with no accounts the dashboard opens straight away, with an "Open access" chip
+        for key in ("ADMIN_ID", "ADMIN_NAME", "ADMIN_CODE", "DRIVER_ID", "DRIVER_NAME", "DRIVER_CODE"):
+            os.environ[f"COLDTRUST_{key}"] = ""
     if a.db:
         os.environ["COLDTRUST_DB"] = a.db
         os.environ.setdefault("COLDTRUST_EVIDENCE_DIR", str(Path(a.db).with_suffix("")) + "-evidence")
