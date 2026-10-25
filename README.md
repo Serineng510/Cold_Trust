@@ -36,8 +36,8 @@ Cold-chain failures can be found only after the cargo has spoiled, and the data 
 1. Install [Python 3.10 or newer](https://www.python.org/downloads/) (tick *Add python.exe to PATH*).
 2. Clone the repository:
    ```bash
-   git clone https://github.com/Serineng510/Frozen_Warden.git
-   cd Frozen_Warden
+   git clone https://github.com/Serineng510/Cold_Trust.git
+   cd Cold_Trust
    ```
 3. **Double-click `judge_demo.bat`.** The first run sets up Python (about a minute). It then starts a throwaway server, plays a scenario with the built-in simulator, and opens the dashboard at <http://127.0.0.1:8000>. No login, no Telegram, no API key.
 

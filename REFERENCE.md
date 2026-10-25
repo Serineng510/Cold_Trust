@@ -17,8 +17,8 @@ by the model. Full design: [PLAN.md](PLAN.md). Diagrams: [docs/diagrams](docs/di
 Needs Python 3.10 or newer (tested on 3.10). On Windows use `.venv\Scripts\python`; on Linux or macOS use `.venv/bin/python`.
 
 ```bash
-git clone https://github.com/Serineng510/Frozen_Warden.git
-cd Frozen_Warden
+git clone https://github.com/Serineng510/Cold_Trust.git
+cd Cold_Trust
 python -m venv .venv
 .venv\Scripts\python -m pip install -r requirements-demo.txt
 .venv\Scripts\python -m backend --timelapse --reset --no-telegram
