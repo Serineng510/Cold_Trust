@@ -2,7 +2,7 @@
 
 > An AI-assisted cold-chain guardian that checks its own sensor data before it acts. Built for HackAI Track 02: Secure Logistics & Digital Trust (Direction 2: Cold-chain guardian).
 
-🎥 **Demo video:** [(https://www.youtube.com/watch?v=b-3K01fc2FE)](#)
+🎥 **Demo video:** [https://www.youtube.com/watch?v=b-3K01fc2FE](#)
 🤖 **Telegram bot:** Frozen Warden · 📐 **Diagrams:** [architecture](docs/diagrams/architecture.png) · [agent workflow](docs/diagrams/agent_workflow.png)
 
 ---
