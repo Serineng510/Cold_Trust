@@ -97,19 +97,19 @@ class Svg:
 def architecture() -> Svg:
     g = Svg(1720, 960)
     g.text(40, 52, "Architecture", size=32, weight="700")
-    g.text(40, 82, "Frozen Warden: a cold-chain guardian that checks its own data before it acts", size=18, fill=MUTED)
+    g.text(40, 82, "ColdTrust: a cold-chain guardian that checks its own data before it acts", size=18, fill=MUTED)
 
     # ---- at a glance (left)
     g.text(40, 135, "At a glance", size=18, weight="700", fill=MUTED)
     g.box(40, 155, 230, 120, "Truck", ["sensors + camera", "in the cargo hold"], fill=BLUE_BG, stroke=BLUE, center=True)
-    g.box(40, 395, 230, 140, "Frozen Warden", ["checks the data,", "decides status,", "AI explains + proposes"], fill=GRAY_BG, stroke=GRAY, center=True)
+    g.box(40, 395, 230, 140, "ColdTrust", ["checks the data,", "decides status,", "AI explains + proposes"], fill=GRAY_BG, stroke=GRAY, center=True)
     g.box(40, 655, 230, 120, "People", ["admin approves,", "driver is alerted"], fill=GREEN_BG, stroke=GREEN, center=True)
     g.arrow([(155, 275), (155, 395)], "signed data", 170, 340, anchor="start")
     g.arrow([(155, 535), (155, 655)], "alerts + proposals", 170, 600, anchor="start")
 
     # ---- detail panel
     g.container(310, 100, 1370, 830, "", stroke=MUTED)
-    g.text(334, 912, "Frozen Warden system in detail", size=17, weight="700", fill=MUTED)
+    g.text(334, 912, "ColdTrust system in detail", size=17, weight="700", fill=MUTED)
 
     # inputs
     g.text(340, 148, "Inputs (the truck)", size=17, weight="700", fill=BLUE)
@@ -147,7 +147,7 @@ def architecture() -> Svg:
                                                         "Accountability: login + lockout, audit log of every decision"],
           fill=AMBER_BG, stroke=AMBER)
     g.box(1220, 520, 430, 130, "Dashboard + Telegram", ["admin: approve, override, report", "driver: alerts, read-only",
-                                                        "Telegram: one message per alert"], fill=GREEN_BG, stroke=GREEN)
+                                                        "Telegram bot (Frozen Warden): one alert each"], fill=GREEN_BG, stroke=GREEN)
     g.arrow([(1165, 590), (1220, 590)])
     g.person(1330, 718, GREEN, "Admin", ["human approval"], size=0.8)
     g.arrow([(1165, 722), (1285, 722)], None, both=True, color=GREEN)

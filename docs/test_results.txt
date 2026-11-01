@@ -1,0 +1,28 @@
+ColdTrust automated test results
+Run: 01 Nov 2026 13:53   Python 3.10.4   command: python -m pytest -q
+
+RESULT: 312 passed in 36.12s
+
+Tests  File                     What it checks
+------------------------------------------------------------------------------
+   33  test_auth.py             login, roles, lockout, who may do what
+   33  test_numbers.py          AI number check and wording filters
+   31  test_report_rules.py     who may get a report, automatic reports
+   30  test_engine.py           rules engine and the ten simulator scenarios
+   27  test_approvals.py        approvals queue (agent proposes, admin decides)
+   27  test_report.py           Word incident report and template filler
+   22  test_llm.py              AI quota guard and prompts
+   18  test_seal.py             Seal trust report and humidity check
+   18  test_standards.py        GS1 EPCIS 2.0 hash vectors, official schema, watchdog
+   17  test_api.py              web API and Telegram wording
+   15  test_maintenance.py      maintenance review
+   14  test_eval.py             AI evaluation checks
+   13  test_detection.py        measured benefit vs a plain alarm
+    7  test_camera.py           camera person detection
+    4  test_units.py            unit conversions and rules maths
+    3  test_no_login.py         judge demo needs no sign-in
+------------------------------------------------------------------------------
+  312  TOTAL
+
+Scope: the rules, the agents' safeguards, the web API and the document and standards outputs.
+Not covered: the physical board (USB, Wi-Fi, sensors), which was checked by hand.
